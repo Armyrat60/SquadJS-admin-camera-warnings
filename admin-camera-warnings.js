@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 
 // Plugin version and repository information
-const PLUGIN_VERSION = 'v1.0.1';
+const PLUGIN_VERSION = 'v1.0.4';
 const GITHUB_OWNER = 'Armyrat60';
 const GITHUB_REPO = 'SquadJS-admin-camera-warnings';
 
@@ -238,21 +238,36 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     this.server.on('CHAT_COMMAND:!camerastats', this.onCameraStatsCommand.bind(this));
     this.server.on('CHAT_COMMAND:!cameradebug', this.onCameraDebugCommand.bind(this));
     
-    // Check for updates on mount
-    this.verbose(1, `🔄 Checking for updates... Current version: ${PLUGIN_VERSION}`);
-    const updateResult = await this.autoUpdater.autoUpdate();
-    
-    if (updateResult.updated) {
-      this.verbose(1, `🎉 Plugin updated successfully to version ${updateResult.newVersion}`);
-      this.verbose(1, `🔄 Please restart SquadJS to apply the update`);
-    }
+    // Wait for SquadJS to be fully initialized before checking for updates
+    this.verbose(1, `⏳ Waiting for SquadJS to fully initialize before checking for updates...`);
+    setTimeout(async () => {
+      try {
+        this.verbose(1, `🔄 Checking for updates... Current version: ${PLUGIN_VERSION}`);
+        const updateResult = await this.autoUpdater.autoUpdate();
+        
+        if (updateResult.updated) {
+          this.verbose(1, `🎉 Plugin updated successfully to version ${updateResult.newVersion}`);
+          this.verbose(1, `🔄 Please restart SquadJS to apply the update`);
+        } else if (updateResult.error) {
+          this.verbose(1, `⚠️  Update check failed: ${updateResult.error}`);
+        }
+      } catch (error) {
+        this.verbose(1, `❌ Update check error: ${error.message}`);
+      }
+    }, 15000); // Wait 15 seconds for SquadJS to fully initialize
     
     // Set up periodic update checks every 30 minutes
     this.updateInterval = setInterval(async () => {
-      const result = await this.autoUpdater.autoUpdate();
-      if (result.updated) {
-        this.verbose(1, `🎉 Plugin auto-updated to version ${result.newVersion}`);
-        this.verbose(1, `🔄 Please restart SquadJS to apply the update`);
+      try {
+        const result = await this.autoUpdater.autoUpdate();
+        if (result.updated) {
+          this.verbose(1, `🎉 Plugin auto-updated to version ${result.newVersion}`);
+          this.verbose(1, `🔄 Please restart SquadJS to apply the update`);
+        } else if (result.error) {
+          this.verbose(1, `⚠️  Periodic update check failed: ${result.error}`);
+        }
+      } catch (error) {
+        this.verbose(1, `❌ Periodic update check error: ${error.message}`);
       }
     }, 30 * 60 * 1000);
     
@@ -814,253 +829,6 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     }
   }
 
-  // Auto-update functionality
-  async checkVersion(latestVersion) {
-    if (!latestVersion) {
-      try {
-        this.verbose(1, `🔍 Fetching latest version from GitHub...`);
-        latestVersion = await this.getLatestVersion();
-      } catch (error) {
-        this.verbose(1, `❌ Error retrieving the latest version of ${this.repo} from ${this.owner}:`, error);
-        return; // Exit early if we can't get the latest version
-      }
-    }
-
-    // If we still don't have a latest version, exit
-    if (!latestVersion) {
-      this.verbose(1, `⚠️  Could not determine latest version for ${this.repo}`);
-      return;
-    }
-
-    this.verbose(1, `📋 Version check: Current: ${this.currentVersion}, Latest: ${latestVersion}`);
-
-    const __DataDirname = fileURLToPath(import.meta.url);
-    // Create Update Cleared File
-    const updateClearedFilePath = path.join(
-      __DataDirname,
-      '..',
-      '..',
-      'AdminCameraWarnings_Data',
-      'update-cleared.json'
-    );
-
-    // Create the directory if it does not exist
-    const dir = path.dirname(updateClearedFilePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-      this.verbose(1, `📁 Created update data directory: ${dir}`);
-    }
-
-    // Create Update Cleared if not exists with cleared: false
-    if (!fs.existsSync(updateClearedFilePath)) {
-      const data = JSON.stringify({ cleared: false }, null, 2);
-      fs.writeFileSync(updateClearedFilePath, data);
-      this.verbose(1, `📝 Created update tracking file: ${updateClearedFilePath}`);
-    }
-
-    const updateCleared = JSON.parse(fs.readFileSync(updateClearedFilePath));
-    if (!updateCleared.cleared) {
-      // Delete old Retry json Files due to potential conflicting changes in the code
-      const retryPostFilePath = path.join(
-        __DataDirname,
-        '..',
-        '..',
-        'AdminCameraWarnings_Data',
-        'send-retry-requests.json'
-      );
-      if (fs.existsSync(retryPostFilePath)) {
-        fs.unlinkSync(retryPostFilePath);
-        this.verbose(1, `🗑️  Cleaned up old retry files`);
-      }
-
-      const retryPatchFilePath = path.join(
-        __DataDirname,
-        '..',
-        '..',
-        'AdminCameraWarnings_Data',
-        'patch-retry-requests.json'
-      );
-      if (fs.existsSync(retryPatchFilePath)) {
-        fs.unlinkSync(retryPatchFilePath);
-        this.verbose(1, `🗑️  Cleaned up old retry files`);
-      }
-
-      // Create/Update the update-cleared.json file
-      fs.writeFileSync(
-        updateClearedFilePath,
-        JSON.stringify({ cleared: true })
-      );
-    }
-
-    const comparisonResult = await this.compareVersions(
-      this.currentVersion,
-      latestVersion
-    );
-
-    if (comparisonResult < 0) {
-      this.verbose(1, `🚀 UPDATE DETECTED! New version available: ${latestVersion}`);
-      this.verbose(1, `📥 Downloading update from GitHub...`);
-
-      const updatedCodeUrl = `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${latestVersion}/squad-server/plugins/admin-camera-warnings.js`;
-
-      // Download the updated code
-      let updatedCode;
-      try {
-        const response = await axios.get(updatedCodeUrl);
-        updatedCode = response.data;
-        this.verbose(1, `✅ Update downloaded successfully (${updatedCode.length} bytes)`);
-      } catch (error) {
-        this.verbose(1, `❌ UPDATE FAILED: Error downloading the updated plugin for ${this.repo}:`, error);
-        return;
-      }
-
-      const __dirname = path.dirname(fileURLToPath(import.meta.url));
-      const filePath = path.join(__dirname, 'admin-camera-warnings.js');
-      
-      // Create backup before updating
-      const backupPath = filePath + `.backup.${Date.now()}`;
-      let currentCode;
-      let backupCreated = false;
-      
-      try {
-        // Read current file and create backup
-        currentCode = fs.readFileSync(filePath, 'utf8');
-        fs.writeFileSync(backupPath, currentCode);
-        backupCreated = true;
-        this.verbose(1, `💾 Backup created: ${backupPath}`);
-      } catch (backupError) {
-        this.verbose(1, `❌ BACKUP FAILED: Could not create backup: ${backupError.message}`);
-        this.verbose(1, `⚠️  Proceeding with update without backup (risky)`);
-      }
-      
-      try {
-        // Write updated code
-        fs.writeFileSync(filePath, updatedCode);
-        this.verbose(1, `✏️  Plugin file updated successfully`);
-
-        // Verify the update was written correctly
-        const verifyCode = fs.readFileSync(filePath, 'utf8');
-        if (verifyCode !== updatedCode) {
-          throw new Error('File verification failed - update was not written correctly');
-        }
-
-        // Set the update-cleared.json file to false
-        fs.writeFileSync(
-          updateClearedFilePath,
-          JSON.stringify({ cleared: false })
-        );
-
-        this.verbose(1, `🎉 SUCCESS: Plugin updated from ${this.currentVersion} to ${latestVersion}`);
-        this.verbose(1, `🔄 Please restart SquadJS to apply the update`);
-        if (backupCreated) {
-          this.verbose(1, `📁 Backup saved to: ${backupPath}`);
-        }
-        
-        // Clean up old backups (keep only last 3)
-        this.cleanupOldBackups(filePath);
-        
-      } catch (error) {
-        this.verbose(1, `❌ UPDATE FAILED: Error writing updated file: ${error.message}`);
-        
-        // Always try to restore from backup if available
-        if (backupCreated && currentCode) {
-          try {
-            fs.writeFileSync(filePath, currentCode);
-            this.verbose(1, `🔄 SUCCESS: Plugin restored from backup after failed update`);
-            this.verbose(1, `📁 Backup location: ${backupPath}`);
-            this.verbose(1, `⚠️  Plugin is now running the previous version (${this.currentVersion})`);
-          } catch (restoreError) {
-            this.verbose(1, `❌ CRITICAL: Failed to restore plugin from backup: ${restoreError.message}`);
-            this.verbose(1, `🚨 MANUAL INTERVENTION REQUIRED: Plugin file may be corrupted`);
-            this.verbose(1, `📁 Manual restore from: ${backupPath}`);
-          }
-        } else {
-          this.verbose(1, `❌ CRITICAL: No backup available for restoration`);
-          this.verbose(1, `🚨 MANUAL INTERVENTION REQUIRED: Plugin file may be corrupted`);
-        }
-        return;
-      }
-    } else if (comparisonResult > 0) {
-      this.verbose(1, `ℹ️  Running newer version (${this.currentVersion}) than latest (${latestVersion})`);
-      this.verbose(1, `📝 This likely means you are running a pre-release or beta version`);
-      this.verbose(1, `🔗 GitHub releases: https://github.com/${this.owner}/${this.repo}/releases`);
-    } else if (comparisonResult === 0) {
-      this.verbose(1, `✅ Already running the latest version (${this.currentVersion})`);
-    } else {
-      this.verbose(1, `⚠️  Unable to check for updates in ${this.repo}`);
-    }
-    return;
-  }
-
-  async getLatestVersion() {
-    try {
-      const url = `https://api.github.com/repos/${this.owner}/${this.repo}/releases/latest`;
-      this.verbose(1, `🌐 Fetching from: ${url}`);
-      
-      const response = await axios.get(url);
-      
-      // Check if the response has data and tag_name
-      if (response.data && response.data.tag_name) {
-        this.verbose(1, `📋 Latest version found: ${response.data.tag_name}`);
-        return response.data.tag_name;
-      } else {
-        this.verbose(1, `⚠️  No releases found for ${this.repo}`);
-        return null;
-      }
-    } catch (error) {
-      if (error.response && error.response.status === 404) {
-        this.verbose(1, `⚠️  Repository ${this.owner}/${this.repo} not found or has no releases. This is normal for new repositories.`);
-      } else {
-        this.verbose(1, `❌ Error fetching latest version from GitHub: ${error.message}`);
-      }
-      return null;
-    }
-  }
-
-  async compareVersions(version1, version2) {
-    // Add null checks to prevent errors
-    if (!version1 || !version2) {
-      return 0; // Can't compare if either version is null/undefined
-    }
-
-    const v1Parts = version1.replace('v', '').split('.').map(Number);
-    const v2Parts = version2.replace('v', '').split('.').map(Number);
-
-    for (let i = 0; i < Math.max(v1Parts.length, v2Parts.length); i++) {
-      const v1 = v1Parts[i] || 0;
-      const v2 = v2Parts[i] || 0;
-
-      if (v1 > v2) return 1;
-      if (v1 < v2) return -1;
-    }
-
-    return 0;
-  }
-
-  // Clean up old backup files to prevent disk space issues
-  cleanupOldBackups(filePath) {
-    try {
-      const backupDir = path.dirname(filePath);
-      const backupFiles = fs.readdirSync(backupDir)
-        .filter(file => file.startsWith('admin-camera-warnings.js.backup.'))
-        .map(file => ({
-          name: file,
-          path: path.join(backupDir, file),
-          time: fs.statSync(path.join(backupDir, file)).mtime.getTime()
-        }))
-        .sort((a, b) => b.time - a.time); // Sort by newest first
-
-      // Keep only the last 3 backups
-      if (backupFiles.length > 3) {
-        const filesToDelete = backupFiles.slice(3);
-        for (const file of filesToDelete) {
-          fs.unlinkSync(file.path);
-          this.verbose(1, `🗑️  Cleaned up old backup: ${file.name}`);
-        }
-        this.verbose(1, `🧹 Backup cleanup completed. Kept ${backupFiles.length - filesToDelete.length} recent backups.`);
-      }
-    } catch (error) {
-      this.verbose(1, `⚠️  Backup cleanup failed: ${error.message}`);
-    }
-  }
+  // Auto-update functionality is now handled by the AutoUpdater utility
+  // All update logic has been moved to squad-server/utils/auto-updater.js
 } 
