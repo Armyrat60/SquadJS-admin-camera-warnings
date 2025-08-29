@@ -756,7 +756,14 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
         latestVersion = await this.getLatestVersion();
       } catch (error) {
         this.verbose(1, `Error retrieving the latest version of ${this.repo} from ${this.owner}:`, error);
+        return; // Exit early if we can't get the latest version
       }
+    }
+
+    // If we still don't have a latest version, exit
+    if (!latestVersion) {
+      this.verbose(1, `Could not determine latest version for ${this.repo}`);
+      return;
     }
 
     const __DataDirname = fileURLToPath(import.meta.url);
@@ -865,12 +872,33 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
   }
 
   async getLatestVersion() {
-    const url = `https://api.github.com/repos/${this.owner}/${this.repo}/releases/latest`;
-    const response = await axios.get(url);
-    return response.data.tag_name;
+    try {
+      const url = `https://api.github.com/repos/${this.owner}/${this.repo}/releases/latest`;
+      const response = await axios.get(url);
+      
+      // Check if the response has data and tag_name
+      if (response.data && response.data.tag_name) {
+        return response.data.tag_name;
+      } else {
+        this.verbose(1, `No releases found for ${this.repo}`);
+        return null;
+      }
+    } catch (error) {
+      if (error.response && error.response.status === 404) {
+        this.verbose(1, `Repository ${this.owner}/${this.repo} not found or has no releases. This is normal for new repositories.`);
+      } else {
+        this.verbose(1, `Error fetching latest version from GitHub: ${error.message}`);
+      }
+      return null;
+    }
   }
 
   async compareVersions(version1, version2) {
+    // Add null checks to prevent errors
+    if (!version1 || !version2) {
+      return 0; // Can't compare if either version is null/undefined
+    }
+
     const v1Parts = version1.replace('v', '').split('.').map(Number);
     const v2Parts = version2.replace('v', '').split('.').map(Number);
 
