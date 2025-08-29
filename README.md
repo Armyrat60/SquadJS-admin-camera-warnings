@@ -1,112 +1,117 @@
-# SquadJS Admin Camera Warnings Plugin
+# AdminCameraWarnings Plugin
 
-A comprehensive SquadJS plugin that provides in-game notifications and Discord alerts when admins enter/leave admin camera, with configurable messages, cooldowns, and enhanced tracking features.
-
-## Features
-
-- **In-Game Warnings**: Notify admins when someone enters/leaves admin camera
-- **Discord Integration**: Send Discord notifications with customizable embeds
-- **Session Tracking**: Monitor admin camera usage and generate statistics
-- **Cooldown System**: Prevent spam notifications with configurable cooldowns
-- **Message Customization**: Fully customizable notification messages
-- **Auto-Update System**: Automatically updates from GitHub releases
-- **Statistics**: Track peak usage, total sessions, and session durations
-
-## Installation
-
-1. Download the `admin-camera-warnings.js` file
-2. Place it in your `squad-server/plugins/` directory
-3. Add the plugin to your `config.json`
-4. Restart SquadJS
-
-## Configuration
-
-```json
-{
-  "AdminCameraWarnings": {
-    "channelID": "YOUR_DISCORD_CHANNEL_ID",
-    "adminRoleID": "YOUR_DISCORD_ADMIN_ROLE_ID",
-    "enableInGameWarnings": true,
-    "enableDiscordNotifications": true,
-    "enableCooldown": true,
-    "cooldownSeconds": 30,
-    "enableSessionTracking": true,
-    "enablePeakTracking": true,
-    "enableDiscordSessionSummary": false
-  }
-}
-```
-
-## Auto-Update System
-
-This plugin includes an automatic update system that:
-- Checks for updates every 30 minutes
-- Downloads new versions from GitHub releases
-- Creates backups before updating
-- Requires a SquadJS restart to apply updates
-
-**Note**: The auto-update system is hardcoded to use the official repository and cannot be modified by users.
-
-## Commands
-
-- `!cameratest` - Test the admin camera warning system
-- `!camerastats` - View current admin camera statistics
-- `!cameradebug` - Debug plugin configuration and permissions
-
-## Message Customization
-
-All notification messages support placeholders:
-- `{admin}` - Name of the admin who triggered the event
-- `{count}` - Number of currently active admins
-- `{duration}` - Duration of the admin camera session
-
-## Discord Integration
-
-The plugin sends rich Discord embeds with:
-- Color-coded notifications (red for enter, green for leave)
-- Timestamps and server information
-- Role pings for admin alerts
-- Session summaries and statistics
-
-## Session Tracking
-
-Tracks detailed information about admin camera usage:
-- Session start/end times
-- Duration tracking
-- Peak concurrent users
-- Total session statistics
-- Round-based session summaries
+## Description
+Monitors admin camera usage and sends in-game warnings when admins enter or leave admin camera. Provides session tracking, duration monitoring, and optional Discord notifications for admin oversight.
 
 ## Requirements
 
-- SquadJS v3.0.0 or higher
-- Discord bot token (for Discord notifications)
-- Admin permissions for in-game commands
+### Required Dependencies
+- **Discord Connector**: Required for Discord notifications and embeds
+- **RCON Connector**: Required for in-game commands and notifications
 
-## Support
+## Features
+- **Admin Camera Tracking** - Monitors when admins enter/leave admin camera
+- **In-Game Warnings** - Sends warnings to admins about camera usage
+- **Session Duration** - Tracks how long admins stay in camera
+- **Active Admin Count** - Shows how many admins are currently in camera
+- **Discord Integration** - Optional Discord notifications
+- **RCON Integration** - Uses RCON for Battlemetrics logging
+- **Configurable Messages** - Customizable warning message formats
+- **Auto-Updates** - Automatic plugin updates with centralized notifications
+- **Smart Backups** - Organized backup system with version tracking
 
-For issues, feature requests, or questions:
-- Create an issue on GitHub
-- Check the SquadJS documentation
-- Review the plugin configuration options
+## Configuration
 
-## License
+### Simple Configuration (Recommended)
+Only the essential settings needed to get started:
+```json
+{
+  "plugin": "AdminCameraWarnings",
+  "enabled": true,
+  "enableInGameWarnings": true
+}
+```
 
-This plugin is provided as-is for use with SquadJS servers.
+### Full Configuration
+All available settings with Discord notifications:
+```json
+{
+  "plugin": "AdminCameraWarnings",
+  "enabled": true,
+  "discordClient": "discord",
+  "channelID": "your-discord-channel-id",
+  "enableInGameWarnings": true,
+  "enableDiscordNotifications": false,
+  "warnMessage": "{admin} entered admin camera. Active admins: {count}",
+  "leaveMessage": "{admin} left admin camera. Active admins: {count}",
+  "includeDuration": true,
+  "durationMessage": "{admin} left admin camera after {duration}. Active admins: {count}"
+}
+```
 
-## Version History
+## Configuration Options
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `discordClient` | string | `"discord"` | Discord connector name |
+| `channelID` | string | optional | Discord channel for notifications |
+| `enableInGameWarnings` | boolean | `true` | Send in-game warnings to admins |
+| `enableDiscordNotifications` | boolean | `false` | Send Discord notifications |
+| `warnMessage` | string | see default | Message when admin enters camera |
+| `leaveMessage` | string | see default | Message when admin leaves camera |
+| `includeDuration` | boolean | `true` | Include session duration in leave messages |
+| `durationMessage` | string | see default | Message format with duration |
 
-- **v1.0.0** - Initial release with core functionality
-- Auto-update system included for seamless updates
+## Message Variables
+- `{admin}` - Name of the admin entering/leaving camera
+- `{count}` - Number of admins currently in camera
+- `{duration}` - Duration of the camera session (leave messages only)
 
-## Contributing
+## Commands
+- `!cameratest` - Test admin camera warning functionality (admin only)
+- `!camerastats` - Show admin camera statistics and session data (admin only)
+- `!cameradebug` - Show admin camera system status (admin only)
+- `!cameraupdate` - Manually check for plugin updates (admin only)
 
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
+## How It Works
+1. **Admin enters camera** → Plugin detects the event
+2. **In-game warning sent** → All admins notified via RCON
+3. **Session tracking** → Plugin tracks duration and active count
+4. **Admin leaves camera** → Plugin detects exit event
+5. **Leave notification** → Admins notified with session duration
 
----
+## Installation
+1. Copy `admin-camera-warnings.js` to your `squad-server/plugins/` folder
+2. Add the configuration above to your `config.json`
+3. Ensure you have RCON connection configured
+4. Restart SquadJS
 
-**Note**: This plugin automatically updates itself from the official repository. Please restart SquadJS after updates are applied.
+## Auto-Updater System
+This plugin integrates with the SquadJS AutoUpdater system for automatic updates:
+
+### Requirements
+- `auto-updater.js` utility in `squad-server/utils/` directory
+- `AutoUpdatePlugin.js` in `squad-server/plugins/` directory (optional, for Discord notifications)
+
+### Features
+- **Automatic Updates**: Checks GitHub releases every 30 minutes
+- **Smart Backups**: Creates organized backups in `BACKUP-Plugins/AdminCameraWarnings/`
+- **Version Tracking**: Maintains README files with update history
+- **Discord Integration**: Sends update notifications through AutoUpdatePlugin
+- **Manual Updates**: Use `!cameraupdate` command to check for updates immediately
+
+### Backup Structure
+```
+squad-server/
+├── BACKUP-Plugins/
+│   └── AdminCameraWarnings/
+│       ├── README.md          ← Version tracking & history
+│       └── admin-camera-warnings.js.backup
+└── plugins/
+    └── admin-camera-warnings.js
+```
+
+## Troubleshooting
+- **Warnings not working**: Check `enableInGameWarnings` setting and RCON connection
+- **Discord not working**: Verify Discord connector and channel ID
+- **Commands not working**: Check admin permissions and RCON connection
+- **No events detected**: Ensure admin camera events are being tracked 
