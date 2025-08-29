@@ -4,6 +4,11 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';
 
+// Plugin version and repository information
+const PLUGIN_VERSION = 'v1.0.0';
+const GITHUB_OWNER = 'Armyrat60';
+const GITHUB_REPO = 'SquadJS-admin-camera-warnings';
+
 export default class AdminCameraWarnings extends DiscordBasePlugin {
   static get description() {
     return (
@@ -23,12 +28,12 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
       channelID: {
         required: false,
         description: 'Discord channel ID for admin camera notifications',
-        default: ''
+        default: 'default'
       },
       adminRoleID: {
         required: false,
         description: 'Discord role ID to ping for admin camera alerts',
-        default: ''
+        default: 'default'
       },
       
       // In-game warnings
@@ -180,11 +185,38 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     this.onNewGame = this.onNewGame.bind(this);
     this.onRoundEnded = this.onRoundEnded.bind(this);
 
-    // Auto-update functionality (built-in like my-squad-stats.js)
-    this.currentVersion = 'v1.0.0';
-    this.owner = 'Armyrat60';
-    this.repo = 'SquadJS-admin-camera-warnings';
+    // Auto-update functionality
+    this.currentVersion = PLUGIN_VERSION;
+    this.owner = GITHUB_OWNER;
+    this.repo = GITHUB_REPO;
     this.checkVersion = this.checkVersion.bind(this);
+
+    // Validate Discord configuration
+    this.validateDiscordConfig();
+  }
+
+  validateDiscordConfig() {
+    const hasValidChannel = this.options.channelID && 
+                           this.options.channelID !== 'default' && 
+                           this.options.channelID !== '';
+    
+    if (!hasValidChannel) {
+      this.verbose(1, '⚠️  Discord channel ID not configured. Discord notifications will be disabled.');
+      this.options.enableDiscordNotifications = false;
+      this.options.enableDiscordSessionSummary = false;
+    } else {
+      this.verbose(1, `✅ Discord channel configured: ${this.options.channelID}`);
+    }
+
+    const hasValidRole = this.options.adminRoleID && 
+                        this.options.adminRoleID !== 'default' && 
+                        this.options.adminRoleID !== '';
+    
+    if (!hasValidRole) {
+      this.verbose(1, '⚠️  Discord admin role ID not configured. Role pings will be disabled.');
+    } else {
+      this.verbose(1, `✅ Discord admin role configured: ${this.options.adminRoleID}`);
+    }
   }
 
   async mount() {
@@ -199,10 +231,12 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     this.server.on('CHAT_COMMAND:!cameradebug', this.onCameraDebugCommand.bind(this));
     
     // Check for updates on mount
+    this.verbose(1, `🔄 Checking for updates... Current version: ${PLUGIN_VERSION}`);
     this.checkVersion();
     
-    // Set up periodic update checks every 30 minutes (like my-squad-stats.js)
+    // Set up periodic update checks every 30 minutes
     this.updateInterval = setInterval(this.checkVersion.bind(this), 30 * 60 * 1000);
+    this.verbose(1, '⏰ Auto-update checks scheduled every 30 minutes');
     
     this.verbose(1, 'AdminCameraWarnings plugin mounted successfully');
   }
@@ -418,7 +452,10 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
   }
 
   async sendDiscordNotification(admin, type, activeCount, session = null) {
-    if (!this.options.channelID) return;
+    if (!this.options.channelID || this.options.channelID === 'default') {
+      this.verbose(1, 'Discord channel not configured, skipping notification.');
+      return;
+    }
 
     try {
       let title, description, color;
@@ -449,7 +486,7 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
 
       // Add admin role ping if configured
       let content = '';
-      if (this.options.adminRoleID) {
+      if (this.options.adminRoleID && this.options.adminRoleID !== 'default') {
         content = `<@&${this.options.adminRoleID}>`;
       }
 
@@ -465,7 +502,10 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
   }
 
   async sendFirstEntryNotification(admin) {
-    if (!this.options.channelID) return;
+    if (!this.options.channelID || this.options.channelID === 'default') {
+      this.verbose(1, 'Discord channel not configured, skipping first entry notification.');
+      return;
+    }
 
     try {
       const message = this.options.firstEntryMessage.replace('{admin}', admin.name);
@@ -481,7 +521,7 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
       };
 
       let content = '';
-      if (this.options.adminRoleID) {
+      if (this.options.adminRoleID && this.options.adminRoleID !== 'default') {
         content = `<@&${this.options.adminRoleID}>`;
       }
 
@@ -497,7 +537,10 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
   }
 
   async sendLastExitNotification(admin) {
-    if (!this.options.channelID) return;
+    if (!this.options.channelID || this.options.channelID === 'default') {
+      this.verbose(1, 'Discord channel not configured, skipping last exit notification.');
+      return;
+    }
 
     try {
       const message = this.options.lastExitMessage;
@@ -513,7 +556,7 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
       };
 
       let content = '';
-      if (this.options.adminRoleID) {
+      if (this.options.adminRoleID && this.options.adminRoleID !== 'default') {
         content = `<@&${this.options.adminRoleID}>`;
       }
 
@@ -529,7 +572,10 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
   }
 
   async sendSessionSummary() {
-    if (!this.options.channelID) return;
+    if (!this.options.channelID || this.options.channelID === 'default') {
+      this.verbose(1, 'Discord channel not configured, skipping session summary.');
+      return;
+    }
 
     try {
       const fields = [];
@@ -749,22 +795,25 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     }
   }
 
-  // Auto-update functionality (copied from my-squad-stats.js)
+  // Auto-update functionality
   async checkVersion(latestVersion) {
     if (!latestVersion) {
       try {
+        this.verbose(1, `🔍 Fetching latest version from GitHub...`);
         latestVersion = await this.getLatestVersion();
       } catch (error) {
-        this.verbose(1, `Error retrieving the latest version of ${this.repo} from ${this.owner}:`, error);
+        this.verbose(1, `❌ Error retrieving the latest version of ${this.repo} from ${this.owner}:`, error);
         return; // Exit early if we can't get the latest version
       }
     }
 
     // If we still don't have a latest version, exit
     if (!latestVersion) {
-      this.verbose(1, `Could not determine latest version for ${this.repo}`);
+      this.verbose(1, `⚠️  Could not determine latest version for ${this.repo}`);
       return;
     }
+
+    this.verbose(1, `📋 Version check: Current: ${this.currentVersion}, Latest: ${latestVersion}`);
 
     const __DataDirname = fileURLToPath(import.meta.url);
     // Create Update Cleared File
@@ -780,12 +829,14 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     const dir = path.dirname(updateClearedFilePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
+      this.verbose(1, `📁 Created update data directory: ${dir}`);
     }
 
     // Create Update Cleared if not exists with cleared: false
     if (!fs.existsSync(updateClearedFilePath)) {
       const data = JSON.stringify({ cleared: false }, null, 2);
       fs.writeFileSync(updateClearedFilePath, data);
+      this.verbose(1, `📝 Created update tracking file: ${updateClearedFilePath}`);
     }
 
     const updateCleared = JSON.parse(fs.readFileSync(updateClearedFilePath));
@@ -800,6 +851,7 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
       );
       if (fs.existsSync(retryPostFilePath)) {
         fs.unlinkSync(retryPostFilePath);
+        this.verbose(1, `🗑️  Cleaned up old retry files`);
       }
 
       const retryPatchFilePath = path.join(
@@ -811,6 +863,7 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
       );
       if (fs.existsSync(retryPatchFilePath)) {
         fs.unlinkSync(retryPatchFilePath);
+        this.verbose(1, `🗑️  Cleaned up old retry files`);
       }
 
       // Create/Update the update-cleared.json file
@@ -826,7 +879,8 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     );
 
     if (comparisonResult < 0) {
-      this.verbose(1, `A new version of ${this.repo} is available. Updating...`);
+      this.verbose(1, `🚀 UPDATE DETECTED! New version available: ${latestVersion}`);
+      this.verbose(1, `📥 Downloading update from GitHub...`);
 
       const updatedCodeUrl = `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${latestVersion}/squad-server/plugins/admin-camera-warnings.js`;
 
@@ -835,38 +889,86 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
       try {
         const response = await axios.get(updatedCodeUrl);
         updatedCode = response.data;
+        this.verbose(1, `✅ Update downloaded successfully (${updatedCode.length} bytes)`);
       } catch (error) {
-        this.verbose(
-          1,
-          `Error downloading the updated plugin for ${this.repo}:`,
-          error
-        );
+        this.verbose(1, `❌ UPDATE FAILED: Error downloading the updated plugin for ${this.repo}:`, error);
         return;
       }
 
       const __dirname = path.dirname(fileURLToPath(import.meta.url));
       const filePath = path.join(__dirname, 'admin-camera-warnings.js');
-      fs.writeFileSync(filePath, updatedCode);
+      
+      // Create backup before updating
+      const backupPath = filePath + `.backup.${Date.now()}`;
+      let currentCode;
+      let backupCreated = false;
+      
+      try {
+        // Read current file and create backup
+        currentCode = fs.readFileSync(filePath, 'utf8');
+        fs.writeFileSync(backupPath, currentCode);
+        backupCreated = true;
+        this.verbose(1, `💾 Backup created: ${backupPath}`);
+      } catch (backupError) {
+        this.verbose(1, `❌ BACKUP FAILED: Could not create backup: ${backupError.message}`);
+        this.verbose(1, `⚠️  Proceeding with update without backup (risky)`);
+      }
+      
+      try {
+        // Write updated code
+        fs.writeFileSync(filePath, updatedCode);
+        this.verbose(1, `✏️  Plugin file updated successfully`);
 
-      // Set the update-cleared.json file to false
-      fs.writeFileSync(
-        updateClearedFilePath,
-        JSON.stringify({ cleared: false })
-      );
+        // Verify the update was written correctly
+        const verifyCode = fs.readFileSync(filePath, 'utf8');
+        if (verifyCode !== updatedCode) {
+          throw new Error('File verification failed - update was not written correctly');
+        }
 
-      this.verbose(
-        1,
-        `Successfully updated ${this.repo} to version ${latestVersion}. Please restart the Node.js process to apply the changes.`
-      );
+        // Set the update-cleared.json file to false
+        fs.writeFileSync(
+          updateClearedFilePath,
+          JSON.stringify({ cleared: false })
+        );
+
+        this.verbose(1, `🎉 SUCCESS: Plugin updated from ${this.currentVersion} to ${latestVersion}`);
+        this.verbose(1, `🔄 Please restart SquadJS to apply the update`);
+        if (backupCreated) {
+          this.verbose(1, `📁 Backup saved to: ${backupPath}`);
+        }
+        
+        // Clean up old backups (keep only last 3)
+        this.cleanupOldBackups(filePath);
+        
+      } catch (error) {
+        this.verbose(1, `❌ UPDATE FAILED: Error writing updated file: ${error.message}`);
+        
+        // Always try to restore from backup if available
+        if (backupCreated && currentCode) {
+          try {
+            fs.writeFileSync(filePath, currentCode);
+            this.verbose(1, `🔄 SUCCESS: Plugin restored from backup after failed update`);
+            this.verbose(1, `📁 Backup location: ${backupPath}`);
+            this.verbose(1, `⚠️  Plugin is now running the previous version (${this.currentVersion})`);
+          } catch (restoreError) {
+            this.verbose(1, `❌ CRITICAL: Failed to restore plugin from backup: ${restoreError.message}`);
+            this.verbose(1, `🚨 MANUAL INTERVENTION REQUIRED: Plugin file may be corrupted`);
+            this.verbose(1, `📁 Manual restore from: ${backupPath}`);
+          }
+        } else {
+          this.verbose(1, `❌ CRITICAL: No backup available for restoration`);
+          this.verbose(1, `🚨 MANUAL INTERVENTION REQUIRED: Plugin file may be corrupted`);
+        }
+        return;
+      }
     } else if (comparisonResult > 0) {
-      this.verbose(
-        1,
-        `You are running a newer version of ${this.repo} than the latest version.\nThis likely means you are running a pre-release or beta version.\nYour Current Version: ${this.currentVersion} Latest Version: ${latestVersion}\nhttps://github.com/${this.owner}/${this.repo}/releases`
-      );
+      this.verbose(1, `ℹ️  Running newer version (${this.currentVersion}) than latest (${latestVersion})`);
+      this.verbose(1, `📝 This likely means you are running a pre-release or beta version`);
+      this.verbose(1, `🔗 GitHub releases: https://github.com/${this.owner}/${this.repo}/releases`);
     } else if (comparisonResult === 0) {
-      this.verbose(1, `You are running the latest version of ${this.repo}.`);
+      this.verbose(1, `✅ Already running the latest version (${this.currentVersion})`);
     } else {
-      this.verbose(1, `Unable to check for updates in ${this.repo}.`);
+      this.verbose(1, `⚠️  Unable to check for updates in ${this.repo}`);
     }
     return;
   }
@@ -874,20 +976,23 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
   async getLatestVersion() {
     try {
       const url = `https://api.github.com/repos/${this.owner}/${this.repo}/releases/latest`;
+      this.verbose(1, `🌐 Fetching from: ${url}`);
+      
       const response = await axios.get(url);
       
       // Check if the response has data and tag_name
       if (response.data && response.data.tag_name) {
+        this.verbose(1, `📋 Latest version found: ${response.data.tag_name}`);
         return response.data.tag_name;
       } else {
-        this.verbose(1, `No releases found for ${this.repo}`);
+        this.verbose(1, `⚠️  No releases found for ${this.repo}`);
         return null;
       }
     } catch (error) {
       if (error.response && error.response.status === 404) {
-        this.verbose(1, `Repository ${this.owner}/${this.repo} not found or has no releases. This is normal for new repositories.`);
+        this.verbose(1, `⚠️  Repository ${this.owner}/${this.repo} not found or has no releases. This is normal for new repositories.`);
       } else {
-        this.verbose(1, `Error fetching latest version from GitHub: ${error.message}`);
+        this.verbose(1, `❌ Error fetching latest version from GitHub: ${error.message}`);
       }
       return null;
     }
@@ -911,5 +1016,32 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     }
 
     return 0;
+  }
+
+  // Clean up old backup files to prevent disk space issues
+  cleanupOldBackups(filePath) {
+    try {
+      const backupDir = path.dirname(filePath);
+      const backupFiles = fs.readdirSync(backupDir)
+        .filter(file => file.startsWith('admin-camera-warnings.js.backup.'))
+        .map(file => ({
+          name: file,
+          path: path.join(backupDir, file),
+          time: fs.statSync(path.join(backupDir, file)).mtime.getTime()
+        }))
+        .sort((a, b) => b.time - a.time); // Sort by newest first
+
+      // Keep only the last 3 backups
+      if (backupFiles.length > 3) {
+        const filesToDelete = backupFiles.slice(3);
+        for (const file of filesToDelete) {
+          fs.unlinkSync(file.path);
+          this.verbose(1, `🗑️  Cleaned up old backup: ${file.name}`);
+        }
+        this.verbose(1, `🧹 Backup cleanup completed. Kept ${backupFiles.length - filesToDelete.length} recent backups.`);
+      }
+    } catch (error) {
+      this.verbose(1, `⚠️  Backup cleanup failed: ${error.message}`);
+    }
   }
 } 
