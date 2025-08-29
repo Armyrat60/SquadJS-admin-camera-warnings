@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs';
 
 // Plugin version and repository information
-const PLUGIN_VERSION = 'v1.0.0';
+const PLUGIN_VERSION = 'v1.0.1';
 const GITHUB_OWNER = 'Armyrat60';
 const GITHUB_REPO = 'SquadJS-admin-camera-warnings';
 
@@ -1045,3 +1045,4 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     }
   }
 } 
+
