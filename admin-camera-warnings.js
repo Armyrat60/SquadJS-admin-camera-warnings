@@ -237,6 +237,7 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     this.server.on('CHAT_COMMAND:!cameratest', this.onCameraTestCommand.bind(this));
     this.server.on('CHAT_COMMAND:!camerastats', this.onCameraStatsCommand.bind(this));
     this.server.on('CHAT_COMMAND:!cameradebug', this.onCameraDebugCommand.bind(this));
+    this.server.on('CHAT_COMMAND:!cameraupdate', this.onCameraUpdateCommand.bind(this));
     
     // Wait for SquadJS to be fully initialized before checking for updates
     this.verbose(1, `⏳ Waiting for SquadJS to fully initialize before checking for updates...`);
@@ -248,8 +249,14 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
         if (updateResult.updated) {
           this.verbose(1, `🎉 Plugin updated successfully to version ${updateResult.newVersion}`);
           this.verbose(1, `🔄 Please restart SquadJS to apply the update`);
+          
+          // Emit event for AutoUpdatePlugin to handle
+          this.server.emit('PLUGIN_UPDATED', 'AdminCameraWarnings', PLUGIN_VERSION, updateResult.newVersion, updateResult.backupPath);
+          this.server.emit('RESTART_REQUIRED', 'AdminCameraWarnings');
         } else if (updateResult.error) {
           this.verbose(1, `⚠️  Update check failed: ${updateResult.error}`);
+        } else {
+          this.verbose(1, `✅ Plugin is up to date or no update needed`);
         }
       } catch (error) {
         this.verbose(1, `❌ Update check error: ${error.message}`);
@@ -263,6 +270,10 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
         if (result.updated) {
           this.verbose(1, `🎉 Plugin auto-updated to version ${result.newVersion}`);
           this.verbose(1, `🔄 Please restart SquadJS to apply the update`);
+          
+          // Emit event for AutoUpdatePlugin to handle
+          this.server.emit('PLUGIN_UPDATED', 'AdminCameraWarnings', PLUGIN_VERSION, result.newVersion, result.backupPath);
+          this.server.emit('RESTART_REQUIRED', 'AdminCameraWarnings');
         } else if (result.error) {
           this.verbose(1, `⚠️  Periodic update check failed: ${result.error}`);
         }
@@ -283,6 +294,7 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     this.server.removeEventListener('CHAT_COMMAND:!cameratest', this.onCameraTestCommand);
     this.server.removeEventListener('CHAT_COMMAND:!camerastats', this.onCameraStatsCommand);
     this.server.removeEventListener('CHAT_COMMAND:!cameradebug', this.onCameraDebugCommand);
+    this.server.removeEventListener('CHAT_COMMAND:!cameraupdate', this.onCameraUpdateCommand);
     
     // Clear update interval
     if (this.updateInterval) {
@@ -777,6 +789,36 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     debug.push(`Online Admins: ${onlineAdmins}`);
 
     await this.sendSplitWarning(player, debug.join('\n'));
+  }
+
+  // Manual update command for admins
+  async onCameraUpdateCommand(info) {
+    const player = this.server.getPlayerByEOSID(info.player.eosID);
+    if (!player || !this.server.isAdmin(player.steamID)) {
+      await this.server.rcon.warn(info.player.eosID, 'You need admin permissions to use this command.');
+      return;
+    }
+
+    try {
+      await this.server.rcon.warn(info.player.eosID, '🔄 Manually checking for updates...');
+      
+      const updateResult = await this.autoUpdater.autoUpdate();
+      
+      if (updateResult.updated) {
+        await this.server.rcon.warn(info.player.eosID, `🎉 Plugin updated to version ${updateResult.newVersion}`);
+        await this.server.rcon.warn(info.player.eosID, '🔄 Please restart SquadJS to apply the update');
+        
+        // Emit event for AutoUpdatePlugin to handle
+        this.server.emit('PLUGIN_UPDATED', 'AdminCameraWarnings', PLUGIN_VERSION, updateResult.newVersion, updateResult.backupPath);
+        this.server.emit('RESTART_REQUIRED', 'AdminCameraWarnings');
+      } else if (updateResult.error) {
+        await this.server.rcon.warn(info.player.eosID, `⚠️ Update check failed: ${updateResult.error}`);
+      } else {
+        await this.server.rcon.warn(info.player.eosID, '✅ Plugin is up to date');
+      }
+    } catch (error) {
+      await this.server.rcon.warn(info.player.eosID, `❌ Update check error: ${error.message}`);
+    }
   }
 
   async sendSplitWarning(player, message, maxLength = 200) {
