@@ -1,8 +1,7 @@
 import DiscordBasePlugin from './discord-base-plugin.js';
-import axios from 'axios';
+import { AutoUpdater } from '../utils/auto-updater.js';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import fs from 'fs';
 
 // Plugin version and repository information
 const PLUGIN_VERSION = 'v1.0.1';
@@ -185,11 +184,20 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     this.onNewGame = this.onNewGame.bind(this);
     this.onRoundEnded = this.onRoundEnded.bind(this);
 
-    // Auto-update functionality
-    this.currentVersion = PLUGIN_VERSION;
-    this.owner = GITHUB_OWNER;
-    this.repo = GITHUB_REPO;
-    this.checkVersion = this.checkVersion.bind(this);
+    // Initialize auto-updater utility
+    const pluginPath = fileURLToPath(import.meta.url);
+    this.autoUpdater = new AutoUpdater(
+      'AdminCameraWarnings',
+      PLUGIN_VERSION,
+      GITHUB_OWNER,
+      GITHUB_REPO,
+      pluginPath
+    );
+
+    // Override the log method to use plugin's verbose system
+    this.autoUpdater.log = (message, ...args) => {
+      this.verbose(1, message, ...args);
+    };
 
     // Validate Discord configuration
     this.validateDiscordConfig();
@@ -232,12 +240,23 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     
     // Check for updates on mount
     this.verbose(1, `🔄 Checking for updates... Current version: ${PLUGIN_VERSION}`);
-    this.checkVersion();
+    const updateResult = await this.autoUpdater.autoUpdate();
+    
+    if (updateResult.updated) {
+      this.verbose(1, `🎉 Plugin updated successfully to version ${updateResult.newVersion}`);
+      this.verbose(1, `🔄 Please restart SquadJS to apply the update`);
+    }
     
     // Set up periodic update checks every 30 minutes
-    this.updateInterval = setInterval(this.checkVersion.bind(this), 30 * 60 * 1000);
-    this.verbose(1, '⏰ Auto-update checks scheduled every 30 minutes');
+    this.updateInterval = setInterval(async () => {
+      const result = await this.autoUpdater.autoUpdate();
+      if (result.updated) {
+        this.verbose(1, `🎉 Plugin auto-updated to version ${result.newVersion}`);
+        this.verbose(1, `🔄 Please restart SquadJS to apply the update`);
+      }
+    }, 30 * 60 * 1000);
     
+    this.verbose(1, '⏰ Auto-update checks scheduled every 30 minutes');
     this.verbose(1, 'AdminCameraWarnings plugin mounted successfully');
   }
 
@@ -1045,4 +1064,3 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     }
   }
 } 
-
