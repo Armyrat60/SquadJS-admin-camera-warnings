@@ -130,7 +130,7 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
       firstEntryMessage: {
         required: false,
         description: 'Message when first admin enters camera',
-        default: '�� ADMIN CAMERA ACTIVATED - {admin} is now monitoring'
+        default: '🚨 ADMIN CAMERA ACTIVATED - {admin} is now monitoring'
       },
       lastExitMessage: {
         required: false,
@@ -219,6 +219,533 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     // Clear update interval
     if (this.updateInterval) {
       clearInterval(this.updateInterval);
+    }
+  }
+
+  async onNewGame(info) {
+    // Reset session tracking for new game
+    this.activeSessions.clear();
+    this.sessionHistory = [];
+    this.cooldowns.clear();
+    
+    this.stats = {
+      totalSessions: 0,
+      totalTime: 0,
+      peakUsers: 0,
+      peakTime: null,
+      firstEntryTime: null,
+      lastExitTime: null
+    };
+
+    this.verbose(1, `New game started - Admin camera tracking reset`);
+  }
+
+  async onRoundEnded(info) {
+    // Send session summary if enabled
+    if (this.options.enableDiscordSessionSummary && this.sessionHistory.length > 0) {
+      await this.sendSessionSummary();
+    }
+  }
+
+  async onPossessedAdminCamera(info) {
+    if (!info.player) return;
+
+    const adminEosID = info.player.eosID;
+    const currentTime = Date.now();
+    const activeCount = this.activeSessions.size;
+
+    // Check cooldown
+    if (this.options.enableCooldown && this.isOnCooldown(adminEosID)) {
+      this.verbose(1, `Admin ${info.player.name} is on cooldown, skipping notification`);
+      return;
+    }
+
+    // Create session data
+    const session = {
+      admin: info.player.name,
+      steamID: info.player.steamID,
+      eosID: adminEosID,
+      startTime: currentTime,
+      endTime: null,
+      duration: null,
+      durationMs: 0
+    };
+
+    // Track session
+    this.activeSessions.set(adminEosID, session);
+    this.sessionHistory.push(session);
+    this.stats.totalSessions++;
+
+    // Update statistics
+    if (this.activeSessions.size > this.stats.peakUsers) {
+      this.stats.peakUsers = this.activeSessions.size;
+      this.stats.peakTime = currentTime;
+    }
+
+    // Track first entry
+    if (this.options.notifyOnFirstEntry && activeCount === 0) {
+      this.stats.firstEntryTime = currentTime;
+      await this.sendFirstEntryNotification(info.player);
+    }
+
+    // Send in-game warnings
+    if (this.options.enableInGameWarnings) {
+      await this.sendInGameNotifications(info.player, 'enter', this.activeSessions.size);
+    }
+
+    // Send Discord notification
+    if (this.options.enableDiscordNotifications) {
+      await this.sendDiscordNotification(info.player, 'enter', this.activeSessions.size);
+    }
+
+    // Set cooldown
+    if (this.options.enableCooldown) {
+      this.setCooldown(adminEosID);
+    }
+
+    this.verbose(1, `Admin ${info.player.name} entered admin camera. Active admins: ${this.activeSessions.size}`);
+  }
+
+  async onUnpossessedAdminCamera(info) {
+    if (!info.player) return;
+
+    const adminEosID = info.player.eosID;
+    const currentTime = Date.now();
+    const session = this.activeSessions.get(adminEosID);
+
+    if (session) {
+      // Update session data
+      session.endTime = currentTime;
+      session.durationMs = currentTime - session.startTime;
+      session.duration = this.formatDuration(session.durationMs);
+      
+      // Update statistics
+      this.stats.totalTime += session.durationMs;
+      this.stats.lastExitTime = currentTime;
+
+      // Remove from active sessions
+      this.activeSessions.delete(adminEosID);
+
+      // Check for last exit
+      if (this.options.notifyOnLastExit && this.activeSessions.size === 0) {
+        await this.sendLastExitNotification(info.player);
+      }
+
+      // Send in-game warnings
+      if (this.options.enableInGameWarnings) {
+        await this.sendInGameNotifications(info.player, 'leave', this.activeSessions.size, session);
+      }
+
+      // Send Discord notification
+      if (this.options.enableDiscordNotifications) {
+        await this.sendDiscordNotification(info.player, 'leave', this.activeSessions.size, session);
+      }
+
+      this.verbose(1, `Admin ${info.player.name} left admin camera after ${session.duration}. Active admins: ${this.activeSessions.size}`);
+    }
+  }
+
+  async sendInGameNotifications(admin, type, activeCount, session = null) {
+    try {
+      const adminEosIDs = this.server.getAdminsWithPermission('canseeadminchat', 'eosID');
+      
+      if (adminEosIDs.length === 0) {
+        this.verbose(1, 'No admins found with canseeadminchat permission');
+        return;
+      }
+
+      let message, confirmationMessage;
+
+      if (type === 'enter') {
+        message = this.options.enterMessage
+          .replace('{admin}', admin.name)
+          .replace('{count}', activeCount);
+        
+        if (this.options.enableConfirmationMessages) {
+          confirmationMessage = this.options.enterConfirmation
+            .replace('{count}', activeCount);
+        }
+      } else { // leave
+        if (session && session.duration && this.options.includeDuration) {
+          message = this.options.durationMessage
+            .replace('{admin}', admin.name)
+            .replace('{duration}', session.duration)
+            .replace('{count}', activeCount);
+          
+          if (this.options.enableConfirmationMessages) {
+            confirmationMessage = this.options.leaveConfirmationWithDuration
+              .replace('{duration}', session.duration)
+              .replace('{count}', activeCount);
+          }
+        } else {
+          message = this.options.leaveMessage
+            .replace('{admin}', admin.name)
+            .replace('{count}', activeCount);
+          
+          if (this.options.enableConfirmationMessages) {
+            confirmationMessage = this.options.leaveConfirmation
+              .replace('{count}', activeCount);
+          }
+        }
+      }
+
+      let warnedCount = 0;
+      for (const player of this.server.players) {
+        if (!adminEosIDs.includes(player.eosID)) continue;
+        
+        try {
+          let messageToSend = message;
+          
+          // Send confirmation to the admin who triggered the event
+          if (player.eosID === admin.eosID && confirmationMessage) {
+            messageToSend = confirmationMessage;
+            this.verbose(1, `Sending confirmation to ${player.name}: ${confirmationMessage}`);
+          } else {
+            this.verbose(1, `Warning admin ${player.name}: ${message}`);
+          }
+          
+          await this.server.rcon.warn(player.eosID, messageToSend);
+          warnedCount++;
+        } catch (error) {
+          this.verbose(1, `Failed to warn admin ${player.name}: ${error.message}`);
+        }
+      }
+      
+      this.verbose(1, `Total admins notified: ${warnedCount}`);
+    } catch (error) {
+      this.verbose(1, `Error sending in-game notifications: ${error.message}`);
+    }
+  }
+
+  async sendDiscordNotification(admin, type, activeCount, session = null) {
+    if (!this.options.channelID) return;
+
+    try {
+      let title, description, color;
+
+      if (type === 'enter') {
+        title = '📹 Admin Camera Activated';
+        description = `**${admin.name}** entered admin camera\n**Active Admins:** ${activeCount}`;
+        color = this.options.enterColor;
+      } else {
+        title = '📹 Admin Camera Deactivated';
+        if (session && session.duration) {
+          description = `**${admin.name}** left admin camera after **${session.duration}**\n**Active Admins:** ${activeCount}`;
+        } else {
+          description = `**${admin.name}** left admin camera\n**Active Admins:** ${activeCount}`;
+        }
+        color = this.options.leaveColor;
+      }
+
+      const embed = {
+        title: title,
+        description: description,
+        color: color,
+        timestamp: new Date().toISOString(),
+        footer: {
+          text: `${this.server.name || 'Squad Server'}`
+        }
+      };
+
+      // Add admin role ping if configured
+      let content = '';
+      if (this.options.adminRoleID) {
+        content = `<@&${this.options.adminRoleID}>`;
+      }
+
+      await this.sendDiscordMessage({
+        content: content,
+        embed: embed
+      });
+
+      this.verbose(1, `Discord notification sent for ${type} event`);
+    } catch (error) {
+      this.verbose(1, `Error sending Discord notification: ${error.message}`);
+    }
+  }
+
+  async sendFirstEntryNotification(admin) {
+    if (!this.options.channelID) return;
+
+    try {
+      const message = this.options.firstEntryMessage.replace('{admin}', admin.name);
+      
+      const embed = {
+        title: '🚨 ADMIN CAMERA ACTIVATED',
+        description: message,
+        color: this.options.enterColor,
+        timestamp: new Date().toISOString(),
+        footer: {
+          text: `${this.server.name || 'Squad Server'}`
+        }
+      };
+
+      let content = '';
+      if (this.options.adminRoleID) {
+        content = `<@&${this.options.adminRoleID}>`;
+      }
+
+      await this.sendDiscordMessage({
+        content: content,
+        embed: embed
+      });
+
+      this.verbose(1, 'First entry Discord notification sent');
+    } catch (error) {
+      this.verbose(1, `Error sending first entry notification: ${error.message}`);
+    }
+  }
+
+  async sendLastExitNotification(admin) {
+    if (!this.options.channelID) return;
+
+    try {
+      const message = this.options.lastExitMessage;
+      
+      const embed = {
+        title: '✅ ADMIN CAMERA DEACTIVATED',
+        description: message,
+        color: this.options.leaveColor,
+        timestamp: new Date().toISOString(),
+        footer: {
+          text: `${this.server.name || 'Squad Server'}`
+        }
+      };
+
+      let content = '';
+      if (this.options.adminRoleID) {
+        content = `<@&${this.options.adminRoleID}>`;
+      }
+
+      await this.sendDiscordMessage({
+        content: content,
+        embed: embed
+      });
+
+      this.verbose(1, 'Last exit Discord notification sent');
+    } catch (error) {
+      this.verbose(1, `Error sending last exit notification: ${error.message}`);
+    }
+  }
+
+  async sendSessionSummary() {
+    if (!this.options.channelID) return;
+
+    try {
+      const fields = [];
+
+      // Session statistics
+      fields.push({
+        name: '📊 Session Statistics',
+        value: `**Total Sessions:** ${this.stats.totalSessions}\n**Total Time:** ${this.formatDuration(this.stats.totalTime)}\n**Peak Users:** ${this.stats.peakUsers}`,
+        inline: true
+      });
+
+      // Active sessions
+      if (this.activeSessions.size > 0) {
+        const activeAdmins = Array.from(this.activeSessions.values())
+          .map(session => session.admin)
+          .join(', ');
+        
+        fields.push({
+          name: '👥 Currently Active',
+          value: activeAdmins,
+          inline: true
+        });
+      }
+
+      // Recent sessions
+      const recentSessions = this.sessionHistory
+        .slice(-5)
+        .map(session => {
+          const duration = session.duration || 'Active';
+          return `**${session.admin}** - ${duration}`;
+        })
+        .join('\n');
+
+      if (recentSessions) {
+        fields.push({
+          name: '🕒 Recent Sessions',
+          value: recentSessions,
+          inline: false
+        });
+      }
+
+      const embed = {
+        title: '📹 Admin Camera Session Summary',
+        color: this.options.summaryColor,
+        fields: fields,
+        timestamp: new Date().toISOString(),
+        footer: {
+          text: `${this.server.name || 'Squad Server'}`
+        }
+      };
+
+      await this.sendDiscordMessage({
+        embed: embed
+      });
+
+      this.verbose(1, 'Session summary sent to Discord');
+    } catch (error) {
+      this.verbose(1, `Error sending session summary: ${error.message}`);
+    }
+  }
+
+  // Utility methods
+  isOnCooldown(eosID) {
+    if (!this.cooldowns.has(eosID)) return false;
+    
+    const lastNotification = this.cooldowns.get(eosID);
+    const cooldownMs = this.options.cooldownSeconds * 1000;
+    
+    return (Date.now() - lastNotification) < cooldownMs;
+  }
+
+  setCooldown(eosID) {
+    this.cooldowns.set(eosID, Date.now());
+  }
+
+  formatDuration(ms) {
+    if (!ms || ms < 0) return '0s';
+    
+    const hours = Math.floor(ms / 3600000);
+    const minutes = Math.floor((ms % 3600000) / 60000);
+    const seconds = Math.floor((ms % 60000) / 1000);
+    
+    if (hours > 0) {
+      return `${hours}h ${minutes}m ${seconds}s`;
+    } else if (minutes > 0) {
+      return `${minutes}m ${seconds}s`;
+    } else {
+      return `${seconds}s`;
+    }
+  }
+
+  // Test commands
+  async onCameraTestCommand(info) {
+    const player = this.server.getPlayerByEOSID(info.player.eosID);
+    if (!player || !this.server.isAdmin(player.steamID)) {
+      await this.server.rcon.warn(info.player.eosID, 'You need admin permissions to use this command.');
+      return;
+    }
+
+    const testMessage = this.options.enterMessage
+      .replace('{admin}', 'TestAdmin')
+      .replace('{count}', '1');
+
+    await this.server.rcon.warn(info.player.eosID, `Testing admin camera warnings: ${testMessage}`);
+    await this.sendInGameNotifications(player, 'enter', 1);
+    await this.server.rcon.warn(info.player.eosID, 'Admin camera test completed!');
+  }
+
+  async onCameraStatsCommand(info) {
+    const player = this.server.getPlayerByEOSID(info.player.eosID);
+    if (!player || !this.server.isAdmin(player.steamID)) {
+      await this.server.rcon.warn(info.player.eosID, 'You need admin permissions to use this command.');
+      return;
+    }
+
+    const stats = [
+      '=== ADMIN CAMERA STATISTICS ===',
+      `Active Sessions: ${this.activeSessions.size}`,
+      `Total Sessions: ${this.stats.totalSessions}`,
+      `Total Time: ${this.formatDuration(this.stats.totalTime)}`,
+      `Peak Users: ${this.stats.peakUsers}`,
+      `Peak Time: ${this.stats.peakTime ? new Date(this.stats.peakTime).toLocaleTimeString() : 'N/A'}`,
+      '',
+      '=== ACTIVE ADMINS ==='
+    ];
+
+    if (this.activeSessions.size > 0) {
+      for (const [eosID, session] of this.activeSessions) {
+        const duration = this.formatDuration(Date.now() - session.startTime);
+        stats.push(`${session.admin} - ${duration}`);
+      }
+    } else {
+      stats.push('No active sessions');
+    }
+
+    await this.sendSplitWarning(info.player, stats.join('\n'));
+  }
+
+  async onCameraDebugCommand(info) {
+    const player = this.server.getPlayerByEOSID(info.player.eosID);
+    if (!player || !this.server.isAdmin(player.steamID)) {
+      await this.server.rcon.warn(info.player.eosID, 'You need admin permissions to use this command.');
+      return;
+    }
+
+    const debug = [
+      '=== ADMIN CAMERA DEBUG ===',
+      `Enable In-Game Warnings: ${this.options.enableInGameWarnings}`,
+      `Enable Discord Notifications: ${this.options.enableDiscordNotifications}`,
+      `Enable Cooldown: ${this.options.enableCooldown}`,
+      `Cooldown Seconds: ${this.options.cooldownSeconds}`,
+      `Enable Confirmation Messages: ${this.options.enableConfirmationMessages}`,
+      '',
+      '=== PERMISSIONS ==='
+    ];
+
+    const adminEosIDs = this.server.getAdminsWithPermission('canseeadminchat', 'eosID');
+    debug.push(`Total Admins: ${adminEosIDs.length}`);
+    debug.push(`Online Players: ${this.server.players.length}`);
+
+    let onlineAdmins = 0;
+    for (const p of this.server.players) {
+      if (adminEosIDs.includes(p.eosID)) onlineAdmins++;
+    }
+    debug.push(`Online Admins: ${onlineAdmins}`);
+
+    await this.sendSplitWarning(player, debug.join('\n'));
+  }
+
+  async sendSplitWarning(player, message, maxLength = 200) {
+    try {
+      if (message.length <= maxLength) {
+        await this.server.rcon.warn(player.eosID, message);
+        return;
+      }
+
+      const lines = message.split('\n');
+      let currentMessage = '';
+      
+      for (const line of lines) {
+        if ((currentMessage + line).length > maxLength) {
+          if (currentMessage) {
+            await this.server.rcon.warn(player.eosID, currentMessage.trim());
+            currentMessage = '';
+          }
+          
+          if (line.length > maxLength) {
+            const words = line.split(' ');
+            let tempLine = '';
+            for (const word of words) {
+              if ((tempLine + word).length > maxLength) {
+                if (tempLine) {
+                  await this.server.rcon.warn(player.eosID, tempLine.trim());
+                  tempLine = '';
+                }
+                tempLine = word + ' ';
+              } else {
+                tempLine += word + ' ';
+              }
+            }
+            if (tempLine) {
+              currentMessage = tempLine;
+            }
+          } else {
+            currentMessage = line + '\n';
+          }
+        } else {
+          currentMessage += line + '\n';
+        }
+      }
+      
+      if (currentMessage.trim()) {
+        await this.server.rcon.warn(player.eosID, currentMessage.trim());
+      }
+    } catch (error) {
+      this.verbose(1, `Error sending split warning to ${player.name}: ${error.message}`);
     }
   }
 
@@ -357,6 +884,4 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
 
     return 0;
   }
-
-  // ... rest of existing code remains the same ...
-}
+} 
