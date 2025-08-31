@@ -226,14 +226,14 @@ For issues or questions:
 
 ## Version History
 
-### v2.0.0
+### v1.0.1
 - Added stealth mode (ignore role)
 - Added disconnect tracking
 - Added flexible warning scope
 - Enhanced statistics and debugging
 - New management commands
 
-### v1.x
+### v1.0.0
 - Basic admin camera notifications
 - Discord integration
 - Session tracking
