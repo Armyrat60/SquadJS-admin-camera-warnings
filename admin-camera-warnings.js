@@ -47,61 +47,11 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
         default: true
       },
       
-      // Message customization
-      enterMessage: {
-        required: false,
-        description: 'Message sent to admins when someone enters admin camera',
-        default: '🚨 {admin} entered admin camera. Active admins: {count}'
-      },
-      leaveMessage: {
-        required: false,
-        description: 'Message sent to admins when someone leaves admin camera',
-        default: '✅ {admin} left admin camera. Active admins: {count}'
-      },
-      includeDuration: {
-        required: false,
-        description: 'Include duration in leave messages',
-        default: true
-      },
-      durationMessage: {
-        required: false,
-        description: 'Message format when including duration',
-        default: '✅ {admin} left admin camera after {duration}. Active admins: {count}'
-      },
+
       
-      // Confirmation messages
-      enableConfirmationMessages: {
-        required: false,
-        description: 'Send confirmation messages to the admin who triggered the event',
-        default: true
-      },
-      enterConfirmation: {
-        required: false,
-        description: 'Confirmation message sent to admin who entered camera',
-        default: 'You entered admin camera. Active admins: {count}'
-      },
-      leaveConfirmation: {
-        required: false,
-        description: 'Confirmation message sent to admin who left camera',
-        default: 'You left admin camera. Active admins: {count}'
-      },
-      leaveConfirmationWithDuration: {
-        required: false,
-        description: 'Confirmation message with duration when admin leaves camera',
-        default: 'You left admin camera after {duration}. Active admins: {count}'
-      },
+
       
-      // Cooldown and spam protection
-      enableCooldown: {
-        required: false,
-        description: 'Enable cooldown to prevent spam notifications',
-        default: true
-      },
-      cooldownSeconds: {
-        required: false,
-        description: 'Cooldown time in seconds between notifications for same admin',
-        default: 30
-      },
+
       
       // Enhanced features
       enableSessionTracking: {
@@ -183,16 +133,11 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
         default: []
       },
       
-      // Disconnect tracking
+      // Disconnect tracking (automatic)
       enableDisconnectTracking: {
         required: false,
-        description: 'Track admin disconnects to clean up orphaned admin camera sessions',
+        description: 'Automatically track admin disconnects and clean up orphaned sessions',
         default: true
-      },
-      disconnectTimeoutSeconds: {
-        required: false,
-        description: 'Seconds to wait before considering an admin disconnected if no explicit leave event',
-        default: 60
       }
     };
   }
@@ -1195,4 +1140,3 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
   // Auto-update functionality is now handled by the AutoUpdater utility
   // All update logic has been moved to squad-server/utils/auto-updater.js
 } 
-
