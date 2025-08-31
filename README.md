@@ -2,7 +2,7 @@
 
 ## Description
 
-The `AdminCameraWarnings` plugin provides comprehensive in-game notifications and Discord alerts when admins enter/leave admin camera, with configurable messages, cooldowns, enhanced tracking features, and automatic updates via the SquadJS AutoUpdater system. This enhanced version includes new features for disconnect tracking, stealth monitoring, and flexible notification targeting.
+The `AdminCameraWarnings` plugin provides comprehensive in-game notifications and Discord alerts when admins enter/leave admin camera, with enhanced tracking features and automatic updates via the SquadJS AutoUpdater system. This v2.0.0 enhanced version includes new features for disconnect tracking, stealth monitoring, flexible notification targeting, and simplified configuration for better consistency.
 
 ## Features
 
@@ -74,33 +74,13 @@ Copy and paste this configuration into your `config.json`:
   "ignoreRoleEOSIDs": ["00000000000000000000000000000001"],
   
   "enableDisconnectTracking": true,
-  "disconnectTimeoutSeconds": 60,
-  
-  "enterMessage": "🚨 {admin} entered admin camera. Active admins: {count}",
-  "leaveMessage": "✅ {admin} left admin camera. Active admins: {count}",
-  "includeDuration": true,
-  "durationMessage": "✅ {admin} left admin camera after {duration}. Active admins: {count}",
-  
-  "enableConfirmationMessages": true,
-  "enterConfirmation": "You entered admin camera. Active admins: {count}",
-  "leaveConfirmation": "You left admin camera. Active admins: {count}",
-  "leaveConfirmationWithDuration": "You left admin camera after {duration}. Active admins: {count}",
-  
-  "enableCooldown": true,
-  "cooldownSeconds": 30,
   
   "enableSessionTracking": true,
   "enablePeakTracking": true,
   "enableDiscordSessionSummary": false,
   
   "notifyOnFirstEntry": true,
-  "notifyOnLastExit": true,
-  "firstEntryMessage": "🚨 ADMIN CAMERA ACTIVATED - {admin} is now monitoring",
-  "lastExitMessage": "✅ ADMIN CAMERA DEACTIVATED - No admins currently monitoring",
-  
-  "enterColor": 16711680,
-  "leaveColor": 65280,
-  "summaryColor": 16776960
+  "notifyOnLastExit": true
 }
 ```
 
@@ -118,33 +98,19 @@ Copy and paste this configuration into your `config.json`:
 | `enableIgnoreRole` | boolean | `false` | Enable ignore role to prevent certain players from triggering warnings |
 | `ignoreRoleSteamIDs` | array | `[]` | Array of Steam IDs to ignore (won't trigger warnings for other admins) |
 | `ignoreRoleEOSIDs` | array | `[]` | Array of EOS IDs to ignore (won't trigger warnings for other admins) |
-| `enableDisconnectTracking` | boolean | `true` | Track admin disconnects to clean up orphaned admin camera sessions |
-| `disconnectTimeoutSeconds` | number | `60` | Seconds to wait before considering an admin disconnected if no explicit leave event |
-| `enterMessage` | string | `"🚨 {admin} entered admin camera. Active admins: {count}"` | Message sent to admins when someone enters admin camera |
-| `leaveMessage` | string | `"✅ {admin} left admin camera. Active admins: {count}"` | Message sent to admins when someone leaves admin camera |
-| `includeDuration` | boolean | `true` | Include duration in leave messages |
-| `durationMessage` | string | `"✅ {admin} left admin camera after {duration}. Active admins: {count}"` | Message format when including duration |
-| `enableConfirmationMessages` | boolean | `true` | Send confirmation messages to the admin who triggered the event |
-| `enterConfirmation` | string | `"You entered admin camera. Active admins: {count}"` | Confirmation message sent to admin who entered camera |
-| `leaveConfirmation` | string | `"You left admin camera. Active admins: {count}"` | Confirmation message sent to admin who left camera |
-| `leaveConfirmationWithDuration` | string | `"You left admin camera after {duration}. Active admins: {count}"` | Confirmation message with duration when admin leaves camera |
-| `enableCooldown` | boolean | `true` | Enable cooldown to prevent spam notifications |
-| `cooldownSeconds` | number | `30` | Cooldown time in seconds between notifications for same admin |
+| `enableDisconnectTracking` | boolean | `true` | Automatically track admin disconnects and clean up orphaned sessions |
 | `enableSessionTracking` | boolean | `true` | Track admin camera sessions for statistics |
 | `enablePeakTracking` | boolean | `true` | Track peak admin camera usage |
 | `enableDiscordSessionSummary` | boolean | `false` | Send Discord summary of admin camera sessions |
 | `notifyOnFirstEntry` | boolean | `true` | Send special notification when first admin enters camera |
 | `notifyOnLastExit` | boolean | `true` | Send special notification when last admin exits camera |
-| `firstEntryMessage` | string | `"🚨 ADMIN CAMERA ACTIVATED - {admin} is now monitoring"` | Message when first admin enters camera |
-| `lastExitMessage` | string | `"✅ ADMIN CAMERA DEACTIVATED - No admins currently monitoring"` | Message when last admin exits camera |
-| `enterColor` | number | `16711680` | Discord embed color for enter notifications (Red) |
-| `leaveColor` | number | `65280` | Discord embed color for leave notifications (Green) |
-| `summaryColor` | number | `16776960` | Discord embed color for session summaries (Yellow) |
 
 ## Message Variables
 - `{admin}` - Name of the admin entering/leaving camera
 - `{count}` - Number of admins currently in camera
 - `{duration}` - Duration of the camera session (leave messages only)
+
+**Note**: All messages are now hardcoded with standard formatting and colors for consistency.
 
 ## Commands
 
@@ -281,12 +247,15 @@ For issues, feature requests, or contributions:
 
 ## Version History
 
-### v1.0.1 (Current)
+### v2.0.0 (Current)
 - **Stealth Mode (Ignore Role)** - Allow certain admins to monitor without alerting others
-- **Disconnect Tracking** - Automatically clean up orphaned admin camera sessions
+- **Disconnect Tracking** - Automatically clean up orphaned admin camera sessions (no timeout needed)
 - **Flexible Warning Scope** - Choose between warning all admins or only those in camera
 - **Enhanced Statistics** - Track orphaned sessions and disconnect cleanups
 - **New Management Commands** - `!cameraignore` command for managing ignore role list
+- **Simplified Configuration** - Removed unnecessary customization options for better consistency
+- **Hardcoded Messages** - Standard professional messages and colors
+- **Automatic Behavior** - No more manual timeout or cooldown settings
 
 ### v1.0.0
 - **Basic Functionality** - Core admin camera monitoring
