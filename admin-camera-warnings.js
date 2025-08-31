@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 
 // Plugin version and repository information
-const PLUGIN_VERSION = 'v1.0.5';
+const PLUGIN_VERSION = 'v1.0.0';
 const GITHUB_OWNER = 'Armyrat60';
 const GITHUB_REPO = 'SquadJS-admin-camera-warnings';
 
@@ -874,4 +874,5 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
   // Auto-update functionality is now handled by the AutoUpdater utility
   // All update logic has been moved to squad-server/utils/auto-updater.js
 } 
+
 
