@@ -4,7 +4,7 @@
 
 The `AdminCameraWarnings` plugin provides comprehensive monitoring and notification systems for admin camera usage in Squad servers. This enhanced version includes new features for disconnect tracking, stealth monitoring, and flexible notification targeting.
 
-## New Features in v2.0
+## New Features in v1.0.1
 
 ### 🕵️ **Stealth Mode (Ignore Role)**
 - **Purpose**: Allow certain admins to monitor without alerting others
