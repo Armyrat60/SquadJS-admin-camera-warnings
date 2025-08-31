@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 
 // Plugin version and repository information
-const PLUGIN_VERSION = 'v2.0.0';
+const PLUGIN_VERSION = 'v2.0.1';
 const GITHUB_OWNER = 'Armyrat60';
 const GITHUB_REPO = 'SquadJS-admin-camera-warnings';
 
@@ -24,6 +24,11 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     return {
       ...DiscordBasePlugin.optionsSpecification,
       // Discord integration
+      discordClient: {
+        required: false,
+        description: 'Discord connector name to use for notifications',
+        default: 'discord'
+      },
       channelID: {
         required: false,
         description: 'Discord channel ID for admin camera notifications',
@@ -81,33 +86,6 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
         description: 'Send special notification when last admin exits camera',
         default: true
       },
-      firstEntryMessage: {
-        required: false,
-        description: 'Message when first admin enters camera',
-        default: '🚨 ADMIN CAMERA ACTIVATED - {admin} is now monitoring'
-      },
-      lastExitMessage: {
-        required: false,
-        description: 'Message when last admin exits camera',
-        default: '✅ ADMIN CAMERA DEACTIVATED - No admins currently monitoring'
-      },
-      
-      // Color customization
-      enterColor: {
-        required: false,
-        description: 'Discord embed color for enter notifications',
-        default: 16711680 // Red
-      },
-      leaveColor: {
-        required: false,
-        description: 'Discord embed color for leave notifications',
-        default: 65280 // Green
-      },
-      summaryColor: {
-        required: false,
-        description: 'Discord embed color for session summaries',
-        default: 16776960 // Yellow
-      },
 
       // Warning scope
       warnOnlyAdminsInCamera: {
@@ -148,7 +126,6 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     // Session tracking
     this.activeSessions = new Map(); // eosID -> session data
     this.sessionHistory = []; // All sessions for current match
-    this.cooldowns = new Map(); // eosID -> last notification time
     
     // Disconnect tracking
     this.disconnectTimeouts = new Map(); // eosID -> timeout reference
@@ -401,15 +378,19 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     const currentTime = Date.now();
     const activeCount = this.activeSessions.size;
 
-    // Check cooldown
-    if (this.options.enableCooldown && this.isOnCooldown(adminEosID)) {
-      this.verbose(1, `Admin ${info.player.name} is on cooldown, skipping notification`);
-      return;
-    }
+
 
     // Check ignore role
     if (this.options.enableIgnoreRole && this.isPlayerIgnored(info.player)) {
       this.verbose(1, `Admin ${info.player.name} is in ignore role, skipping notification`);
+      
+      // Warn the player that they're on the ignored list
+      try {
+        await this.server.rcon.warn(info.player.eosID, '🕵️ You are on the stealth monitoring list. Your admin camera actions will not alert other admins.');
+      } catch (error) {
+        this.verbose(1, `Failed to warn ignored player ${info.player.name}: ${error.message}`);
+      }
+      
       return;
     }
 
@@ -451,10 +432,7 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
       await this.sendDiscordNotification(info.player, 'enter', this.activeSessions.size);
     }
 
-    // Set cooldown
-    if (this.options.enableCooldown) {
-      this.setCooldown(adminEosID);
-    }
+
 
     this.verbose(1, `Admin ${info.player.name} entered admin camera. Active admins: ${this.activeSessions.size}`);
   }
@@ -465,6 +443,20 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     const adminEosID = info.player.eosID;
     const currentTime = Date.now();
     const session = this.activeSessions.get(adminEosID);
+
+    // Check ignore role for leave notifications
+    if (this.options.enableIgnoreRole && this.isPlayerIgnored(info.player)) {
+      this.verbose(1, `Admin ${info.player.name} is in ignore role, skipping leave notification.`);
+      
+      // Warn the player that they're on the ignored list
+      try {
+        await this.server.rcon.warn(info.player.eosID, '🕵️ You are on the stealth monitoring list. Your admin camera actions will not alert other admins.');
+      } catch (error) {
+        this.verbose(1, `Failed to warn ignored player ${info.player.name}: ${error.message}`);
+      }
+      
+      return;
+    }
 
     if (session) {
       // Update session data
@@ -520,35 +512,15 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
       let message, confirmationMessage;
 
       if (type === 'enter') {
-        message = this.options.enterMessage
-          .replace('{admin}', admin.name)
-          .replace('{count}', activeCount);
-        
-        if (this.options.enableConfirmationMessages) {
-          confirmationMessage = this.options.enterConfirmation
-            .replace('{count}', activeCount);
-        }
+        message = `🚨 ${admin.name} entered admin camera. Active admins: ${activeCount}`;
+        confirmationMessage = `You entered admin camera. Active admins: ${activeCount}`;
       } else { // leave
-        if (session && session.duration && this.options.includeDuration) {
-          message = this.options.durationMessage
-            .replace('{admin}', admin.name)
-            .replace('{duration}', session.duration)
-            .replace('{count}', activeCount);
-          
-          if (this.options.enableConfirmationMessages) {
-            confirmationMessage = this.options.leaveConfirmationWithDuration
-              .replace('{duration}', session.duration)
-              .replace('{count}', activeCount);
-          }
+        if (session && session.duration) {
+          message = `✅ ${admin.name} left admin camera after ${session.duration}. Active admins: ${activeCount}`;
+          confirmationMessage = `You left admin camera after ${session.duration}. Active admins: ${activeCount}`;
         } else {
-          message = this.options.leaveMessage
-            .replace('{admin}', admin.name)
-            .replace('{count}', activeCount);
-          
-          if (this.options.enableConfirmationMessages) {
-            confirmationMessage = this.options.leaveConfirmation
-              .replace('{count}', activeCount);
-          }
+          message = `✅ ${admin.name} left admin camera. Active admins: ${activeCount}`;
+          confirmationMessage = `You left admin camera. Active admins: ${activeCount}`;
         }
       }
 
@@ -808,15 +780,7 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     }
   }
 
-  // Utility methods
-  isOnCooldown(eosID) {
-    if (!this.cooldowns.has(eosID)) return false;
-    
-    const lastNotification = this.cooldowns.get(eosID);
-    const cooldownMs = this.options.cooldownSeconds * 1000;
-    
-    return (Date.now() - lastNotification) < cooldownMs;
-  }
+
 
   isPlayerIgnored(player) {
     if (!this.options.enableIgnoreRole) return false;
@@ -856,9 +820,7 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     this.verbose(1, `Cleaned up orphaned session for ${playerName} after ${session.duration} (disconnected)`);
   }
 
-  setCooldown(eosID) {
-    this.cooldowns.set(eosID, Date.now());
-  }
+
 
   formatDuration(ms) {
     if (!ms || ms < 0) return '0s';
@@ -884,9 +846,7 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
       return;
     }
 
-    const testMessage = this.options.enterMessage
-      .replace('{admin}', 'TestAdmin')
-      .replace('{count}', '1');
+    const testMessage = `🚨 TestAdmin entered admin camera. Active admins: 1`;
 
     await this.server.rcon.warn(info.player.eosID, `Testing admin camera warnings: ${testMessage}`);
     await this.sendInGameNotifications(player, 'enter', 1);
@@ -940,15 +900,11 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
       '=== ADMIN CAMERA DEBUG ===',
       `Enable In-Game Warnings: ${this.options.enableInGameWarnings}`,
       `Enable Discord Notifications: ${this.options.enableDiscordNotifications}`,
-      `Enable Cooldown: ${this.options.enableCooldown}`,
-      `Cooldown Seconds: ${this.options.cooldownSeconds}`,
-      `Enable Confirmation Messages: ${this.options.enableConfirmationMessages}`,
       '',
       '=== NEW FEATURES ===',
       `Warn Only Admins In Camera: ${this.options.warnOnlyAdminsInCamera}`,
       `Enable Ignore Role: ${this.options.enableIgnoreRole}`,
       `Enable Disconnect Tracking: ${this.options.enableDisconnectTracking}`,
-      `Disconnect Timeout: ${this.options.disconnectTimeoutSeconds}s`,
       '',
       '=== PERMISSIONS ==='
     ];
