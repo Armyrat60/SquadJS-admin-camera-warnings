@@ -16,14 +16,17 @@ The `AdminCameraWarnings` plugin provides comprehensive in-game notifications an
 - **Session Statistics** - Tracks total sessions, time, and peak usage
 - **Peak Tracking** - Monitors maximum concurrent admin camera users
 - **First/Last Entry Notifications** - Special alerts for camera activation/deactivation
-- **Cooldown System** - Prevents spam notifications from the same admin
-- **Confirmation Messages** - Sends personalized messages to the admin who triggered events
+- **Automatic Confirmation Messages** - Sends personalized messages to the admin who triggered events
 
-### New Features (v1.0.1)
+### New Features (v2.0.0)
 - **Stealth Mode (Ignore Role)** - Allow certain admins to monitor without alerting others
-- **Disconnect Tracking** - Automatically clean up orphaned admin camera sessions
+- **Disconnect Tracking** - Automatically clean up orphaned admin camera sessions (no timeout needed)
 - **Flexible Warning Scope** - Choose between warning all admins or only those in camera
 - **Enhanced Statistics** - Track orphaned sessions and disconnect cleanups
+- **Simplified Configuration** - Removed unnecessary customization options for better consistency
+- **Hardcoded Messages** - Standard professional messages and colors
+- **Automatic Behavior** - No more manual timeout or cooldown settings
+- **Stealth Mode Feedback** - Players on ignore list get notified that they're in stealth mode
 
 ### Discord Integration
 - **Real-time Notifications** - Instant Discord alerts for camera events
@@ -61,6 +64,7 @@ Copy and paste this configuration into your `config.json`:
 {
   "plugin": "AdminCameraWarnings",
   "enabled": true,
+  "discordClient": "discord",
   "channelID": "your-discord-channel-id",
   "adminRoleID": "your-admin-role-id",
   
@@ -90,6 +94,7 @@ Copy and paste this configuration into your `config.json`:
 |---------|------|---------|-------------|
 | `plugin` | string | `"AdminCameraWarnings"` | Plugin name (required) |
 | `enabled` | boolean | `true` | Enable/disable the plugin |
+| `discordClient` | string | `"discord"` | Discord connector name to use for notifications |
 | `channelID` | string | `"default"` | Discord channel ID for notifications |
 | `adminRoleID` | string | `"default"` | Discord role ID to ping for alerts |
 | `enableInGameWarnings` | boolean | `true` | Send in-game warnings when admins enter/leave camera |
@@ -138,6 +143,7 @@ Copy and paste this configuration into your `config.json`:
 - **Training sessions**: Senior admins can observe without disruption
 - **Investigation**: Monitor suspicious activity without alerting targets
 - **Session management**: Track admin camera usage and duration
+- **Stealth feedback**: Players on ignore list know they're in stealth mode
 
 ### Session Management
 - **Crash recovery**: Automatic cleanup of orphaned sessions
