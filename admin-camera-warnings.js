@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 
 // Plugin version and repository information
-const PLUGIN_VERSION = 'v1.0.0';
+const PLUGIN_VERSION = 'v1.0.1';
 const GITHUB_OWNER = 'Armyrat60';
 const GITHUB_REPO = 'SquadJS-admin-camera-warnings';
 
@@ -157,6 +157,42 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
         required: false,
         description: 'Discord embed color for session summaries',
         default: 16776960 // Yellow
+      },
+
+      // Warning scope
+      warnOnlyAdminsInCamera: {
+        required: false,
+        description: 'Only warn admins who are currently in admin camera (instead of all online admins)',
+        default: false
+      },
+      
+      // Ignore role for stealth monitoring
+      enableIgnoreRole: {
+        required: false,
+        description: 'Enable ignore role to prevent certain players from triggering warnings',
+        default: false
+      },
+      ignoreRoleSteamIDs: {
+        required: false,
+        description: 'Array of Steam IDs to ignore (won\'t trigger warnings for other admins)',
+        default: []
+      },
+      ignoreRoleEOSIDs: {
+        required: false,
+        description: 'Array of EOS IDs to ignore (won\'t trigger warnings for other admins)',
+        default: []
+      },
+      
+      // Disconnect tracking
+      enableDisconnectTracking: {
+        required: false,
+        description: 'Track admin disconnects to clean up orphaned admin camera sessions',
+        default: true
+      },
+      disconnectTimeoutSeconds: {
+        required: false,
+        description: 'Seconds to wait before considering an admin disconnected if no explicit leave event',
+        default: 60
       }
     };
   }
@@ -169,6 +205,10 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     this.sessionHistory = []; // All sessions for current match
     this.cooldowns = new Map(); // eosID -> last notification time
     
+    // Disconnect tracking
+    this.disconnectTimeouts = new Map(); // eosID -> timeout reference
+    this.orphanedSessions = new Map(); // eosID -> orphaned session data
+    
     // Statistics
     this.stats = {
       totalSessions: 0,
@@ -176,13 +216,17 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
       peakUsers: 0,
       peakTime: null,
       firstEntryTime: null,
-      lastExitTime: null
+      lastExitTime: null,
+      orphanedSessions: 0,
+      disconnectCleanups: 0
     };
 
     this.onPossessedAdminCamera = this.onPossessedAdminCamera.bind(this);
     this.onUnpossessedAdminCamera = this.onUnpossessedAdminCamera.bind(this);
     this.onNewGame = this.onNewGame.bind(this);
     this.onRoundEnded = this.onRoundEnded.bind(this);
+    this.onPlayerDisconnected = this.onPlayerDisconnected.bind(this);
+    this.onPlayerConnected = this.onPlayerConnected.bind(this);
 
     // Initialize auto-updater utility
     const pluginPath = fileURLToPath(import.meta.url);
@@ -201,6 +245,7 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
 
     // Validate Discord configuration
     this.validateDiscordConfig();
+    this.validateIgnoreRoleConfig();
   }
 
   validateDiscordConfig() {
@@ -227,17 +272,38 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     }
   }
 
+  validateIgnoreRoleConfig() {
+    if (!this.options.enableIgnoreRole) {
+      this.verbose(1, '🕵️  Ignore role disabled - all admin actions will trigger warnings');
+      return;
+    }
+
+    const steamIDCount = this.options.ignoreRoleSteamIDs?.length || 0;
+    const eosIDCount = this.options.ignoreRoleEOSIDs?.length || 0;
+    
+    if (steamIDCount === 0 && eosIDCount === 0) {
+      this.verbose(1, '⚠️  Ignore role enabled but no IDs configured');
+    } else {
+      this.verbose(1, `🕵️  Ignore role enabled - ${steamIDCount} Steam IDs and ${eosIDCount} EOS IDs configured`);
+      this.verbose(1, `Steam IDs: ${this.options.ignoreRoleSteamIDs?.join(', ') || 'None'}`);
+      this.verbose(1, `EOS IDs: ${this.options.ignoreRoleEOSIDs?.join(', ') || 'None'}`);
+    }
+  }
+
   async mount() {
     this.server.on('POSSESSED_ADMIN_CAMERA', this.onPossessedAdminCamera);
     this.server.on('UNPOSSESSED_ADMIN_CAMERA', this.onUnpossessedAdminCamera);
     this.server.on('NEW_GAME', this.onNewGame);
     this.server.on('ROUND_ENDED', this.onRoundEnded);
+    this.server.on('PLAYER_DISCONNECTED', this.onPlayerDisconnected);
+    this.server.on('PLAYER_CONNECTED', this.onPlayerConnected);
     
     // Add test commands
     this.server.on('CHAT_COMMAND:!cameratest', this.onCameraTestCommand.bind(this));
     this.server.on('CHAT_COMMAND:!camerastats', this.onCameraStatsCommand.bind(this));
     this.server.on('CHAT_COMMAND:!cameradebug', this.onCameraDebugCommand.bind(this));
     this.server.on('CHAT_COMMAND:!cameraupdate', this.onCameraUpdateCommand.bind(this));
+    this.server.on('CHAT_COMMAND:!cameraignore', this.onCameraIgnoreCommand.bind(this));
     
     // Wait for SquadJS to be fully initialized before checking for updates
     this.verbose(1, `⏳ Waiting for SquadJS to fully initialize before checking for updates...`);
@@ -291,10 +357,13 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     this.server.removeEventListener('UNPOSSESSED_ADMIN_CAMERA', this.onUnpossessedAdminCamera);
     this.server.removeEventListener('NEW_GAME', this.onNewGame);
     this.server.removeEventListener('ROUND_ENDED', this.onRoundEnded);
+    this.server.removeEventListener('PLAYER_DISCONNECTED', this.onPlayerDisconnected);
+    this.server.removeEventListener('PLAYER_CONNECTED', this.onPlayerConnected);
     this.server.removeEventListener('CHAT_COMMAND:!cameratest', this.onCameraTestCommand);
     this.server.removeEventListener('CHAT_COMMAND:!camerastats', this.onCameraStatsCommand);
     this.server.removeEventListener('CHAT_COMMAND:!cameradebug', this.onCameraDebugCommand);
     this.server.removeEventListener('CHAT_COMMAND:!cameraupdate', this.onCameraUpdateCommand);
+    this.server.removeEventListener('CHAT_COMMAND:!cameraignore', this.onCameraIgnoreCommand);
     
     // Clear update interval
     if (this.updateInterval) {
@@ -308,13 +377,22 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     this.sessionHistory = [];
     this.cooldowns.clear();
     
+    // Clear disconnect tracking
+    for (const timeout of this.disconnectTimeouts.values()) {
+      clearTimeout(timeout);
+    }
+    this.disconnectTimeouts.clear();
+    this.orphanedSessions.clear();
+    
     this.stats = {
       totalSessions: 0,
       totalTime: 0,
       peakUsers: 0,
       peakTime: null,
       firstEntryTime: null,
-      lastExitTime: null
+      lastExitTime: null,
+      orphanedSessions: 0,
+      disconnectCleanups: 0
     };
 
     this.verbose(1, `New game started - Admin camera tracking reset`);
@@ -324,6 +402,50 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     // Send session summary if enabled
     if (this.options.enableDiscordSessionSummary && this.sessionHistory.length > 0) {
       await this.sendSessionSummary();
+    }
+  }
+
+  async onPlayerDisconnected(info) {
+    if (!this.options.enableDisconnectTracking || !info.player) return;
+
+    const playerEosID = info.player.eosID;
+    const session = this.activeSessions.get(playerEosID);
+
+    if (session) {
+      this.verbose(1, `Admin ${info.player.name} disconnected while in admin camera, setting cleanup timeout`);
+      
+      // Set a timeout to clean up the session if they don't reconnect
+      const timeout = setTimeout(() => {
+        this.cleanupOrphanedSession(playerEosID, info.player.name);
+      }, this.options.disconnectTimeoutSeconds * 1000);
+
+      this.disconnectTimeouts.set(playerEosID, timeout);
+      this.orphanedSessions.set(playerEosID, {
+        ...session,
+        disconnectTime: Date.now(),
+        playerName: info.player.name
+      });
+    }
+  }
+
+  async onPlayerConnected(info) {
+    if (!this.options.enableDisconnectTracking || !info.player) return;
+
+    const playerEosID = info.player.eosID;
+    const timeout = this.disconnectTimeouts.get(playerEosID);
+    const orphanedSession = this.orphanedSessions.get(playerEosID);
+
+    if (timeout) {
+      // Clear the disconnect timeout since they reconnected
+      clearTimeout(timeout);
+      this.disconnectTimeouts.delete(playerEosID);
+      this.verbose(1, `Admin ${info.player.name} reconnected, cleared disconnect timeout`);
+    }
+
+    if (orphanedSession) {
+      // Remove from orphaned sessions since they reconnected
+      this.orphanedSessions.delete(playerEosID);
+      this.verbose(1, `Admin ${info.player.name} reconnected, restored from orphaned sessions`);
     }
   }
 
@@ -337,6 +459,12 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     // Check cooldown
     if (this.options.enableCooldown && this.isOnCooldown(adminEosID)) {
       this.verbose(1, `Admin ${info.player.name} is on cooldown, skipping notification`);
+      return;
+    }
+
+    // Check ignore role
+    if (this.options.enableIgnoreRole && this.isPlayerIgnored(info.player)) {
+      this.verbose(1, `Admin ${info.player.name} is in ignore role, skipping notification`);
       return;
     }
 
@@ -427,10 +555,20 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
 
   async sendInGameNotifications(admin, type, activeCount, session = null) {
     try {
-      const adminEosIDs = this.server.getAdminsWithPermission('canseeadminchat', 'eosID');
+      let adminEosIDs;
+      
+      if (this.options.warnOnlyAdminsInCamera) {
+        // Only warn admins who are currently in admin camera
+        adminEosIDs = Array.from(this.activeSessions.keys());
+        this.verbose(1, `Warning only admins in camera: ${adminEosIDs.length} admins`);
+      } else {
+        // Warn all online admins with canseeadminchat permission
+        adminEosIDs = this.server.getAdminsWithPermission('canseeadminchat', 'eosID');
+        this.verbose(1, `Warning all online admins: ${adminEosIDs.length} admins`);
+      }
       
       if (adminEosIDs.length === 0) {
-        this.verbose(1, 'No admins found with canseeadminchat permission');
+        this.verbose(1, 'No admins to notify');
         return;
       }
 
@@ -617,6 +755,39 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     }
   }
 
+  async sendOrphanedSessionNotification(playerName, session) {
+    if (!this.options.channelID || this.options.channelID === 'default') {
+      this.verbose(1, 'Discord channel not configured, skipping orphaned session notification.');
+      return;
+    }
+
+    try {
+      const embed = {
+        title: '⚠️ ADMIN CAMERA SESSION ORPHANED',
+        description: `**${playerName}** disconnected while in admin camera\n**Session Duration:** ${session.duration}\n**Reason:** Disconnect/Crash/Alt+F4`,
+        color: 16776960, // Yellow
+        timestamp: new Date().toISOString(),
+        footer: {
+          text: `${this.server.name || 'Squad Server'}`
+        }
+      };
+
+      let content = '';
+      if (this.options.adminRoleID && this.options.adminRoleID !== 'default') {
+        content = `<@&${this.options.adminRoleID}>`;
+      }
+
+      await this.sendDiscordMessage({
+        content: content,
+        embed: embed
+      });
+
+      this.verbose(1, 'Orphaned session Discord notification sent');
+    } catch (error) {
+      this.verbose(1, `Error sending orphaned session notification: ${error.message}`);
+    }
+  }
+
   async sendSessionSummary() {
     if (!this.options.channelID || this.options.channelID === 'default') {
       this.verbose(1, 'Discord channel not configured, skipping session summary.');
@@ -632,6 +803,15 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
         value: `**Total Sessions:** ${this.stats.totalSessions}\n**Total Time:** ${this.formatDuration(this.stats.totalTime)}\n**Peak Users:** ${this.stats.peakUsers}`,
         inline: true
       });
+
+      // Disconnect tracking statistics
+      if (this.options.enableDisconnectTracking) {
+        fields.push({
+          name: '⚠️ Disconnect Tracking',
+          value: `**Orphaned Sessions:** ${this.stats.orphanedSessions}\n**Cleanups:** ${this.stats.disconnectCleanups}`,
+          inline: true
+        });
+      }
 
       // Active sessions
       if (this.activeSessions.size > 0) {
@@ -693,6 +873,44 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     return (Date.now() - lastNotification) < cooldownMs;
   }
 
+  isPlayerIgnored(player) {
+    if (!this.options.enableIgnoreRole) return false;
+    
+    const isSteamIDIgnored = this.options.ignoreRoleSteamIDs?.includes(player.steamID);
+    const isEOSIDIgnored = this.options.ignoreRoleEOSIDs?.includes(player.eosID);
+    
+    return isSteamIDIgnored || isEOSIDIgnored;
+  }
+
+  cleanupOrphanedSession(eosID, playerName) {
+    const session = this.activeSessions.get(eosID);
+    if (!session) return;
+
+    const currentTime = Date.now();
+    session.endTime = currentTime;
+    session.durationMs = currentTime - session.startTime;
+    session.duration = this.formatDuration(session.durationMs);
+    session.orphaned = true;
+    session.orphanReason = 'disconnect';
+
+    // Update statistics
+    this.stats.totalTime += session.durationMs;
+    this.stats.orphanedSessions++;
+    this.stats.disconnectCleanups++;
+
+    // Remove from active sessions
+    this.activeSessions.delete(eosID);
+    this.disconnectTimeouts.delete(eosID);
+    this.orphanedSessions.delete(eosID);
+
+    // Send Discord notification about orphaned session
+    if (this.options.enableDiscordNotifications) {
+      this.sendOrphanedSessionNotification(playerName, session);
+    }
+
+    this.verbose(1, `Cleaned up orphaned session for ${playerName} after ${session.duration} (disconnected)`);
+  }
+
   setCooldown(eosID) {
     this.cooldowns.set(eosID, Date.now());
   }
@@ -745,6 +963,12 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
       `Peak Users: ${this.stats.peakUsers}`,
       `Peak Time: ${this.stats.peakTime ? new Date(this.stats.peakTime).toLocaleTimeString() : 'N/A'}`,
       '',
+      '=== DISCONNECT TRACKING ===',
+      `Orphaned Sessions: ${this.stats.orphanedSessions}`,
+      `Disconnect Cleanups: ${this.stats.disconnectCleanups}`,
+      `Current Timeouts: ${this.disconnectTimeouts.size}`,
+      `Orphaned Sessions: ${this.orphanedSessions.size}`,
+      '',
       '=== ACTIVE ADMINS ==='
     ];
 
@@ -774,6 +998,12 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
       `Enable Cooldown: ${this.options.enableCooldown}`,
       `Cooldown Seconds: ${this.options.cooldownSeconds}`,
       `Enable Confirmation Messages: ${this.options.enableConfirmationMessages}`,
+      '',
+      '=== NEW FEATURES ===',
+      `Warn Only Admins In Camera: ${this.options.warnOnlyAdminsInCamera}`,
+      `Enable Ignore Role: ${this.options.enableIgnoreRole}`,
+      `Enable Disconnect Tracking: ${this.options.enableDisconnectTracking}`,
+      `Disconnect Timeout: ${this.options.disconnectTimeoutSeconds}s`,
       '',
       '=== PERMISSIONS ==='
     ];
@@ -818,6 +1048,97 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
       }
     } catch (error) {
       await this.server.rcon.warn(info.player.eosID, `❌ Update check error: ${error.message}`);
+    }
+  }
+
+  // Ignore role management command for admins
+  async onCameraIgnoreCommand(info) {
+    const player = this.server.getPlayerByEOSID(info.player.eosID);
+    if (!player || !this.server.isAdmin(player.steamID)) {
+      await this.server.rcon.warn(info.player.eosID, 'You need admin permissions to use this command.');
+      return;
+    }
+
+    const args = info.message.split(' ').slice(1);
+    if (args.length === 0) {
+      // Show current ignore role status
+      const status = [
+        '=== IGNORE ROLE STATUS ===',
+        `Enabled: ${this.options.enableIgnoreRole}`,
+        '',
+        '=== STEAM IDs ===',
+        ...(this.options.ignoreRoleSteamIDs?.length > 0 ? this.options.ignoreRoleSteamIDs : ['None configured']),
+        '',
+        '=== EOS IDs ===',
+        ...(this.options.ignoreRoleEOSIDs?.length > 0 ? this.options.ignoreRoleEOSIDs : ['None configured']),
+        '',
+        'Usage: !cameraignore <add/remove> <steam/eos> <ID>'
+      ];
+      
+      await this.sendSplitWarning(player, status.join('\n'));
+      return;
+    }
+
+    if (args.length < 3) {
+      await this.server.rcon.warn(player.eosID, 'Usage: !cameraignore <add/remove> <steam/eos> <ID>');
+      return;
+    }
+
+    const action = args[0].toLowerCase();
+    const idType = args[1].toLowerCase();
+    const id = args[2];
+
+    if (action !== 'add' && action !== 'remove') {
+      await this.server.rcon.warn(player.eosID, 'Invalid action. Use "add" or "remove"');
+      return;
+    }
+
+    if (idType !== 'steam' && idType !== 'eos') {
+      await this.server.rcon.warn(player.eosID, 'Invalid ID type. Use "steam" or "eos"');
+      return;
+    }
+
+    try {
+      if (action === 'add') {
+        if (idType === 'steam') {
+          if (!this.options.ignoreRoleSteamIDs) this.options.ignoreRoleSteamIDs = [];
+          if (!this.options.ignoreRoleSteamIDs.includes(id)) {
+            this.options.ignoreRoleSteamIDs.push(id);
+            await this.server.rcon.warn(player.eosID, `✅ Added Steam ID ${id} to ignore role`);
+          } else {
+            await this.server.rcon.warn(player.eosID, `⚠️ Steam ID ${id} is already in ignore role`);
+          }
+        } else {
+          if (!this.options.ignoreRoleEOSIDs) this.options.ignoreRoleEOSIDs = [];
+          if (!this.options.ignoreRoleEOSIDs.includes(id)) {
+            this.options.ignoreRoleEOSIDs.push(id);
+            await this.server.rcon.warn(player.eosID, `✅ Added EOS ID ${id} to ignore role`);
+          } else {
+            await this.server.rcon.warn(player.eosID, `⚠️ EOS ID ${id} is already in ignore role`);
+          }
+        }
+      } else { // remove
+        if (idType === 'steam') {
+          if (this.options.ignoreRoleSteamIDs?.includes(id)) {
+            this.options.ignoreRoleSteamIDs = this.options.ignoreRoleSteamIDs.filter(sid => sid !== id);
+            await this.server.rcon.warn(player.eosID, `✅ Removed Steam ID ${id} from ignore role`);
+          } else {
+            await this.server.rcon.warn(player.eosID, `⚠️ Steam ID ${id} is not in ignore role`);
+          }
+        } else {
+          if (this.options.ignoreRoleEOSIDs?.includes(id)) {
+            this.options.ignoreRoleEOSIDs = this.options.ignoreRoleEOSIDs.filter(eid => eid !== id);
+            await this.server.rcon.warn(player.eosID, `✅ Removed EOS ID ${id} from ignore role`);
+          } else {
+            await this.server.rcon.warn(player.eosID, `⚠️ EOS ID ${id} is not in ignore role`);
+          }
+        }
+      }
+
+      // Re-validate configuration
+      this.validateIgnoreRoleConfig();
+    } catch (error) {
+      await this.server.rcon.warn(player.eosID, `❌ Error managing ignore role: ${error.message}`);
     }
   }
 
@@ -874,5 +1195,3 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
   // Auto-update functionality is now handled by the AutoUpdater utility
   // All update logic has been moved to squad-server/utils/auto-updater.js
 } 
-
-
