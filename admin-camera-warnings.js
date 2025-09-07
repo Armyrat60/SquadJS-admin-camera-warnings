@@ -1,5 +1,5 @@
 import DiscordBasePlugin from './discord-base-plugin.js';
-import { AutoUpdater } from '../utils/auto-updater.js';
+import { UpdateManager } from '../utils/update-manager.js';
 import { fileURLToPath } from 'url';
 import path from 'path';
 
@@ -126,6 +126,7 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     // Session tracking
     this.activeSessions = new Map(); // eosID -> session data
     this.sessionHistory = []; // All sessions for current match
+    this.cooldowns = new Map(); // eosID -> cooldown data
     
     // Disconnect tracking
     this.disconnectTimeouts = new Map(); // eosID -> timeout reference
@@ -150,20 +151,15 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     this.onPlayerDisconnected = this.onPlayerDisconnected.bind(this);
     this.onPlayerConnected = this.onPlayerConnected.bind(this);
 
-    // Initialize auto-updater utility
-    const pluginPath = fileURLToPath(import.meta.url);
-    this.autoUpdater = new AutoUpdater(
+    // Simple registration with UpdateManager
+    UpdateManager.registerPlugin(
       'AdminCameraWarnings',
       PLUGIN_VERSION,
       GITHUB_OWNER,
       GITHUB_REPO,
-      pluginPath
+      fileURLToPath(import.meta.url),
+      (message, ...args) => this.verbose(1, message, ...args)
     );
-
-    // Override the log method to use plugin's verbose system
-    this.autoUpdater.log = (message, ...args) => {
-      this.verbose(1, message, ...args);
-    };
 
     // Validate Discord configuration
     this.validateDiscordConfig();
@@ -224,73 +220,22 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     this.server.on('CHAT_COMMAND:!cameratest', this.onCameraTestCommand.bind(this));
     this.server.on('CHAT_COMMAND:!camerastats', this.onCameraStatsCommand.bind(this));
     this.server.on('CHAT_COMMAND:!cameradebug', this.onCameraDebugCommand.bind(this));
-    this.server.on('CHAT_COMMAND:!cameraupdate', this.onCameraUpdateCommand.bind(this));
     this.server.on('CHAT_COMMAND:!cameraignore', this.onCameraIgnoreCommand.bind(this));
     
-    // Wait for SquadJS to be fully initialized before checking for updates
-    this.verbose(1, `⏳ Waiting for SquadJS to fully initialize before checking for updates...`);
-    setTimeout(async () => {
-      try {
-        this.verbose(1, `🔄 Checking for updates... Current version: ${PLUGIN_VERSION}`);
-        const updateResult = await this.autoUpdater.autoUpdate();
-        
-        if (updateResult.updated) {
-          this.verbose(1, `🎉 Plugin updated successfully to version ${updateResult.newVersion}`);
-          this.verbose(1, `🔄 Please restart SquadJS to apply the update`);
-          
-          // Emit event for AutoUpdatePlugin to handle
-          this.server.emit('PLUGIN_UPDATED', 'AdminCameraWarnings', PLUGIN_VERSION, updateResult.newVersion, updateResult.backupPath);
-          this.server.emit('RESTART_REQUIRED', 'AdminCameraWarnings');
-        } else if (updateResult.error) {
-          this.verbose(1, `⚠️  Update check failed: ${updateResult.error}`);
-        } else {
-          this.verbose(1, `✅ Plugin is up to date or no update needed`);
-        }
-      } catch (error) {
-        this.verbose(1, `❌ Update check error: ${error.message}`);
-      }
-    }, 15000); // Wait 15 seconds for SquadJS to fully initialize
-    
-    // Set up periodic update checks every 30 minutes
-    this.updateInterval = setInterval(async () => {
-      try {
-        const result = await this.autoUpdater.autoUpdate();
-        if (result.updated) {
-          this.verbose(1, `🎉 Plugin auto-updated to version ${result.newVersion}`);
-          this.verbose(1, `🔄 Please restart SquadJS to apply the update`);
-          
-          // Emit event for AutoUpdatePlugin to handle
-          this.server.emit('PLUGIN_UPDATED', 'AdminCameraWarnings', PLUGIN_VERSION, result.newVersion, result.backupPath);
-          this.server.emit('RESTART_REQUIRED', 'AdminCameraWarnings');
-        } else if (result.error) {
-          this.verbose(1, `⚠️  Periodic update check failed: ${result.error}`);
-        }
-      } catch (error) {
-        this.verbose(1, `❌ Periodic update check error: ${error.message}`);
-      }
-    }, 30 * 60 * 1000);
-    
-    this.verbose(1, '⏰ Auto-update checks scheduled every 30 minutes');
     this.verbose(1, 'AdminCameraWarnings plugin mounted successfully');
   }
 
   async unmount() {
-    this.server.removeEventListener('POSSESSED_ADMIN_CAMERA', this.onPossessedAdminCamera);
-    this.server.removeEventListener('UNPOSSESSED_ADMIN_CAMERA', this.onUnpossessedAdminCamera);
-    this.server.removeEventListener('NEW_GAME', this.onNewGame);
-    this.server.removeEventListener('ROUND_ENDED', this.onRoundEnded);
-    this.server.removeEventListener('PLAYER_DISCONNECTED', this.onPlayerDisconnected);
-    this.server.removeEventListener('PLAYER_CONNECTED', this.onPlayerConnected);
-    this.server.removeEventListener('CHAT_COMMAND:!cameratest', this.onCameraTestCommand);
-    this.server.removeEventListener('CHAT_COMMAND:!camerastats', this.onCameraStatsCommand);
-    this.server.removeEventListener('CHAT_COMMAND:!cameradebug', this.onCameraDebugCommand);
-    this.server.removeEventListener('CHAT_COMMAND:!cameraupdate', this.onCameraUpdateCommand);
-    this.server.removeEventListener('CHAT_COMMAND:!cameraignore', this.onCameraIgnoreCommand);
-    
-    // Clear update interval
-    if (this.updateInterval) {
-      clearInterval(this.updateInterval);
-    }
+    this.server.off('POSSESSED_ADMIN_CAMERA', this.onPossessedAdminCamera);
+    this.server.off('UNPOSSESSED_ADMIN_CAMERA', this.onUnpossessedAdminCamera);
+    this.server.off('NEW_GAME', this.onNewGame);
+    this.server.off('ROUND_ENDED', this.onRoundEnded);
+    this.server.off('PLAYER_DISCONNECTED', this.onPlayerDisconnected);
+    this.server.off('PLAYER_CONNECTED', this.onPlayerConnected);
+    this.server.off('CHAT_COMMAND:!cameratest', this.onCameraTestCommand);
+    this.server.off('CHAT_COMMAND:!camerastats', this.onCameraStatsCommand);
+    this.server.off('CHAT_COMMAND:!cameradebug', this.onCameraDebugCommand);
+    this.server.off('CHAT_COMMAND:!cameraignore', this.onCameraIgnoreCommand);
   }
 
   async onNewGame(info) {
@@ -922,35 +867,6 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     await this.sendSplitWarning(player, debug.join('\n'));
   }
 
-  // Manual update command for admins
-  async onCameraUpdateCommand(info) {
-    const player = this.server.getPlayerByEOSID(info.player.eosID);
-    if (!player || !this.server.isAdmin(player.steamID)) {
-      await this.server.rcon.warn(info.player.eosID, 'You need admin permissions to use this command.');
-      return;
-    }
-
-    try {
-      await this.server.rcon.warn(info.player.eosID, '🔄 Manually checking for updates...');
-      
-      const updateResult = await this.autoUpdater.autoUpdate();
-      
-      if (updateResult.updated) {
-        await this.server.rcon.warn(info.player.eosID, `🎉 Plugin updated to version ${updateResult.newVersion}`);
-        await this.server.rcon.warn(info.player.eosID, '🔄 Please restart SquadJS to apply the update');
-        
-        // Emit event for AutoUpdatePlugin to handle
-        this.server.emit('PLUGIN_UPDATED', 'AdminCameraWarnings', PLUGIN_VERSION, updateResult.newVersion, updateResult.backupPath);
-        this.server.emit('RESTART_REQUIRED', 'AdminCameraWarnings');
-      } else if (updateResult.error) {
-        await this.server.rcon.warn(info.player.eosID, `⚠️ Update check failed: ${updateResult.error}`);
-      } else {
-        await this.server.rcon.warn(info.player.eosID, '✅ Plugin is up to date');
-      }
-    } catch (error) {
-      await this.server.rcon.warn(info.player.eosID, `❌ Update check error: ${error.message}`);
-    }
-  }
 
   // Ignore role management command for admins
   async onCameraIgnoreCommand(info) {
@@ -1093,6 +1009,6 @@ export default class AdminCameraWarnings extends DiscordBasePlugin {
     }
   }
 
-  // Auto-update functionality is now handled by the AutoUpdater utility
-  // All update logic has been moved to squad-server/utils/auto-updater.js
+  // Auto-update functionality is now handled by the UpdateManager
+  // All update logic has been moved to squad-server/utils/update-manager.js
 } 
